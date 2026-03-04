@@ -1,0 +1,12 @@
+<svg width="1600" height="380" viewBox="0 0 1600 380" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="380" fill="#F5F7FA"/>
+  <rect x="40" y="40" width="300" height="300" rx="24" fill="#D9FBEA"/>
+  <circle cx="190" cy="140" r="52" fill="#1E293B"/>
+  <rect x="145" y="190" width="90" height="120" rx="18" fill="#1E293B"/>
+  <rect x="90" y="210" width="50" height="28" rx="14" fill="#1E293B"/>
+  <rect x="240" y="210" width="50" height="28" rx="14" fill="#1E293B"/>
+  <circle cx="83" cy="224" r="23" fill="#0EA5E9"/>
+  <circle cx="297" cy="224" r="23" fill="#0EA5E9"/>
+  <text x="390" y="230" font-family="'Segoe UI', Arial, sans-serif" font-size="170" font-weight="800" fill="#10B981">OPENGYM</text>
+  <text x="392" y="290" font-family="'Segoe UI', Arial, sans-serif" font-size="44" font-weight="600" fill="#64748B">Open template for LLM-first repositories</text>
+</svg>
