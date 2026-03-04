@@ -2,59 +2,119 @@
   <img src="logo.png" alt="OpenGym logo" width="100%" />
 
   # OpenGym
-  **A production-minded open template for LLM-native product development**
+  **Local-first AI fitness engineering with deterministic, science-backed logic**
 
-  [![Status](https://img.shields.io/badge/status-active%20template-22c55e)](#)
+  [![Status](https://img.shields.io/badge/status-active%20development-22c55e)](#)
   [![GitHub stars](https://img.shields.io/github/stars/lev1nson/OpenGym?style=flat)](https://github.com/lev1nson/OpenGym/stargazers)
   [![GitHub forks](https://img.shields.io/github/forks/lev1nson/OpenGym?style=flat)](https://github.com/lev1nson/OpenGym/network/members)
   [![Contributions](https://img.shields.io/badge/contributions-welcome-3b82f6)](CONTRIBUTING.md)
   [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 </div>
 
-OpenGym is a repository template for teams building AI-first products with clear engineering standards.
+OpenGym is a practical foundation for building an AI-native training system where reasoning is transparent, safety constraints are explicit, and product behavior remains deterministic under real-world usage.
 
-It gives you a practical baseline for documentation, prompting discipline, contribution culture, and iterative delivery — so your project starts structured from day one.
+The repository combines:
 
----
-
-## Why OpenGym
-
-Most LLM projects fail not because of model quality, but because of process chaos.
-
-OpenGym is designed to solve exactly that:
-
-- **Documentation-first workflow** for faster onboarding and lower team ambiguity.
-- **Prompt governance** with reusable system/task prompt structure.
-- **Contributor-friendly setup** with explicit contribution rules and change tracking.
-- **GitHub-native hygiene** with CI checks and repository conventions.
-- **Scalable project skeleton** suitable for prototypes and production evolution.
+- a production-proven gym-coach skill architecture,
+- a science-rulebook direction (`gym-coach-brain`),
+- and strong GitHub documentation culture for rapid, reliable iteration.
 
 ---
 
-## Core Features
+## Why this project exists
 
-- **Clear project scaffolding** across [`docs/`](docs), [`prompts/`](prompts), and [`assets/`](assets).
-- **Canonical repository docs**: [`README.md`](README.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CHANGELOG.md`](CHANGELOG.md), [`LICENSE`](LICENSE).
-- **LLM operating guide** in [`docs/LLM_GUIDE.md`](docs/LLM_GUIDE.md).
-- **Roadmap baseline** in [`docs/ROADMAP.md`](docs/ROADMAP.md).
-- **Prompt templates** in [`prompts/system.md`](prompts/system.md) and [`prompts/task-template.md`](prompts/task-template.md).
-- **Basic CI guardrails** for documentation quality in [`.github/workflows/`](.github/workflows).
+Most AI fitness assistants fail for one reason: probabilistic outputs are asked to make deterministic training decisions.
+
+OpenGym is built to solve that architecture mismatch.
+
+- **Deterministic training logic first** (progression, volume control, readiness).
+- **LLM/NL as interface layer**, not as final authority over load decisions.
+- **Science-backed constraints** as explicit configuration and documented method.
+- **Local-first operation** to keep athlete data private and portable.
 
 ---
 
-## What Makes It Better Than a Typical Starter Repo
+## What is implemented today
 
-1. **It encodes culture, not just files**
-   - Convention over chaos: clear expectations for docs, prompts, and collaboration.
+### Core product capabilities
 
-2. **It is AI-workflow aware**
-   - Structure is optimized for human + LLM co-development.
+- **Natural language workout control** (RU/EN mixed input) through [`workspace/skills/gym-coach/router.py`](workspace/skills/gym-coach/router.py)
+- **Structured CLI engine** in [`workspace/skills/gym-coach/gym_coach.py`](workspace/skills/gym-coach/gym_coach.py)
+- **Training session lifecycle**: start/status/set/done/pause/resume/abort/undo
+- **Program workflow**: import/show/analyze/next
+- **Science-oriented adaptation logic** (deterministic recommendation engine)
+- **Readiness logging + historical context** for decision support
+- **SQLite persistence with WAL mode** for robust local operation
 
-3. **It is transparent by design**
-   - Change history and roadmap are first-class citizens, not afterthoughts.
+### Product documentation assets
 
-4. **It is implementation-agnostic**
-   - Works for Python, JS/TS, backend APIs, agent systems, and mixed stacks.
+- Architecture deep-dive: [`docs/architecture.md`](docs/architecture.md)
+- System overview: [`docs/project-overview.md`](docs/project-overview.md)
+- Contracts and data model docs: [`docs/api-contracts.md`](docs/api-contracts.md), [`docs/data-models.md`](docs/data-models.md)
+- Technology decisions: [`docs/technology-stack.md`](docs/technology-stack.md)
+- Planning and research artifacts: [`_bmad-output/`](_bmad-output)
+
+---
+
+## Architecture snapshot
+
+```mermaid
+flowchart LR
+  U[User / OpenClaw Agent] --> R[router.py\nNL Proxy]
+  R --> C[gym_coach.py\nDeterministic CLI Engine]
+  C --> D[(SQLite WAL)]
+  C --> A[Adaptation Logic\nReadiness + History]
+  D --> A
+```
+
+Design principle: **probabilistic input, deterministic execution**.
+
+---
+
+## Why OpenGym is unique
+
+1. **Deterministic core + AI interface split**
+   - Clear separation between intent parsing and training decisions reduces hallucination risk.
+
+2. **Science evidence orientation**
+   - Methodology is treated as a first-class artifact (see [`gym-coach-brain/ScienceEvidence.md`](gym-coach-brain/ScienceEvidence.md)).
+
+3. **Local-first by default**
+   - No mandatory cloud stack for core behavior; privacy and operational control remain with the athlete/team.
+
+4. **Transparent engineering culture**
+   - Docs include architecture, known issues, trade-offs, and roadmap rather than marketing-only claims.
+
+5. **Migration path, not rewrite fantasy**
+   - The repo captures both current working system and planned modular evolution.
+
+---
+
+## Quality and transparency posture
+
+- Current architecture and known debt are openly documented in [`docs/index.md`](docs/index.md).
+- Severity matrix and refactoring priorities are explicit in [`docs/architecture.md`](docs/architecture.md).
+- Engineering decisions are traceable through [`CHANGELOG.md`](CHANGELOG.md) and [`_bmad-output/`](_bmad-output).
+
+This makes the project reviewable, forkable, and easier to evolve safely.
+
+---
+
+## Repository structure
+
+```text
+OpenGym/
+├─ assets/                # logos, visual assets
+├─ docs/                  # architecture, contracts, data model, guides
+├─ prompts/               # LLM behavior and task prompt templates
+├─ gym-coach-brain/       # modular next-step package direction
+├─ workspace/skills/gym-coach/  # current working skill implementation
+├─ _bmad-output/          # planning/research/implementation artifacts
+├─ CHANGELOG.md
+├─ CONTRIBUTING.md
+├─ LICENSE
+└─ README.md
+```
 
 ---
 
@@ -68,51 +128,42 @@ cd OpenGym
 # 2) Create your working branch
 git checkout -b chore/bootstrap-project
 
-# 3) Customize the project baseline
-# - README.md: project positioning and value proposition
-# - docs/LLM_GUIDE.md: model usage rules and constraints
-# - prompts/system.md: core system behavior
+# 3) Explore docs first
+# - docs/index.md
+# - docs/architecture.md
+
+# 4) Run/inspect the current skill implementation
+# (from workspace/skills/gym-coach)
 ```
 
 ---
 
-## Recommended Structure
+## Roadmap status
 
-```text
-OpenGym/
-├─ assets/                # logos, banners, visual assets
-├─ docs/
-│  ├─ LLM_GUIDE.md        # operating rules for LLM usage
-│  └─ ROADMAP.md          # milestones and release direction
-├─ prompts/
-│  ├─ system.md           # canonical system prompt
-│  └─ task-template.md    # reusable task prompt template
-├─ .github/workflows/
-│  └─ docs-check.yml      # minimal CI checks for docs quality
-├─ CHANGELOG.md
-├─ CONTRIBUTING.md
-├─ LICENSE
-└─ README.md
-```
+The project is in active build/refactor phase:
+
+- **Current state:** working monolith skill with real functionality.
+- **In progress:** extracting a cleaner modular architecture in [`gym-coach-brain/`](gym-coach-brain).
+- **Focus:** reliability, test coverage, and deterministic safety guarantees.
 
 ---
 
-## Best Practices for Teams
+## Best practices for contributors
 
 - Keep [`README.md`](README.md) focused on **problem → solution → value**.
-- Treat [`docs/LLM_GUIDE.md`](docs/LLM_GUIDE.md) as the source of truth for model behavior and safety boundaries.
-- Version prompt changes like code changes.
+- Treat architecture and contract docs as production artifacts.
+- Version prompt and behavior changes like code changes.
 - Update [`CHANGELOG.md`](CHANGELOG.md) on every meaningful iteration.
 - Use pull requests to preserve decision history and review quality.
 
 ---
 
-## Project Maturity Checklist
+## Next high-impact improvements
 
-- [ ] Add domain-specific references and datasets to [`docs/LLM_GUIDE.md`](docs/LLM_GUIDE.md)
-- [ ] Define evaluation scenarios (golden tests / acceptance prompts)
-- [ ] Strengthen CI with quality gates and linting
-- [ ] Add architecture and deployment docs when moving to production
+- [ ] Expand automated tests for parser and adaptation edge cases
+- [ ] Add stronger CI quality gates
+- [ ] Continue monolith-to-modular extraction in [`gym-coach-brain/`](gym-coach-brain)
+- [ ] Add release versioning and changelog discipline for milestones
 
 ---
 
