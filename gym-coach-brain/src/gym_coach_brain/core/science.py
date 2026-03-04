@@ -1,0 +1,186 @@
+import re
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, Field, model_validator
+
+
+class PUOSConfig(BaseModel):
+    """Per-Unique-Output-per-Session volume limits.
+
+    max_sets_per_group: PUOS session limit (~10–11 sets; Israetel/Schoenfeld).
+    smh_volume_multiplier: SMH volume multiplier (evidence-informed heuristic,
+        Israetel 1.2–1.3; stored as ≥0 to allow placeholder 0.0 in skeleton).
+    """
+
+    max_sets_per_group: int = Field(ge=0)
+    smh_volume_multiplier: float = Field(ge=0.0)
+
+
+class ProgressionConfig(BaseModel):
+    """Weight progression and rep-range parameters.
+
+    Increment fields: Knight (1979) APRE-6 base steps; compound/isolation deltas.
+    Rep range: Schoenfeld & Grgic (2021) hypertrophy bracket (6–12).
+    All fields ≥0 to allow placeholder 0/0.0 values in skeleton.
+    """
+
+    compound_increment_kg: float = Field(ge=0.0)
+    isolation_increment_kg: float = Field(ge=0.0)
+    apre_6_step_min_kg: float = Field(ge=0.0)
+    apre_6_step_max_kg: float = Field(ge=0.0)
+    hypertrophy_rep_min: int = Field(ge=0)
+    hypertrophy_rep_max: int = Field(ge=0)
+
+
+class RecoveryConfig(BaseModel):
+    """Composite readiness formula weights: hrv + sleep + stress = 1.0.
+
+    Weights are evidence-informed heuristics (Kiviniemi 2007, PMC).
+    Sum must equal exactly 1.0 (enforced by model_validator).
+    """
+
+    hrv_weight: float = Field(ge=0.0)
+    sleep_weight: float = Field(ge=0.0)
+    stress_weight: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def weights_sum_to_one(self) -> "RecoveryConfig":
+        total = self.hrv_weight + self.sleep_weight + self.stress_weight
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(
+                f"Recovery weights must sum to 1.0, got {total:.4f} "
+                f"(hrv={self.hrv_weight}, sleep={self.sleep_weight}, "
+                f"stress={self.stress_weight})"
+            )
+        return self
+
+
+class MethodologySpec(BaseModel):
+    """Rep ranges and training frequency for a single methodology.
+
+    Source: Schoenfeld & Grgic (2021, PMC7927075).
+    All fields ≥0 to allow placeholder 0 values in skeleton.
+    """
+
+    rep_min: int = Field(ge=0)
+    rep_max: int = Field(ge=0)
+    frequency_per_week_min: int = Field(ge=0)
+    frequency_per_week_max: int = Field(ge=0)
+
+
+class MethodologiesConfig(BaseModel):
+    """Training methodologies: strength, hypertrophy, endurance."""
+
+    strength: MethodologySpec
+    hypertrophy: MethodologySpec
+    endurance: MethodologySpec
+
+
+class PlanningConfig(BaseModel):
+    """Minimum rest days between same-muscle-group sessions.
+
+    min_rest_days_per_muscle_group: isolation exercises (48h = 2 days;
+        PMC6015912, Monteiro 2018; PMC6719818, De Salles 2010).
+    min_rest_days_compound: multi-joint movements (72h = 3 days).
+    All fields ≥0 to allow placeholder 0 values in skeleton.
+    """
+
+    min_rest_days_per_muscle_group: int = Field(ge=0)
+    min_rest_days_compound: int = Field(ge=0)
+
+
+class ExerciseConfig(BaseModel):
+    """Exercise-specific overrides.
+
+    smh_eligible: Whether the exercise is eligible for the SMH volume multiplier.
+        Defaults to True as most exercises are SMH-eligible in the RP system.
+    """
+
+    smh_eligible: bool = True
+
+
+class ScienceConfig(BaseModel):
+    """Root model for ScienceEvidence.md YAML frontmatter.
+
+    Loaded ONCE per process at startup (Composition Root pattern).
+    Pass as parameter — never store as module-level singleton.
+    """
+
+    version: str
+    puos: PUOSConfig
+    progression: ProgressionConfig
+    recovery: RecoveryConfig
+    exercises: dict[str, ExerciseConfig]
+    methodologies: MethodologiesConfig
+    planning: PlanningConfig
+
+
+_FRONTMATTER_RE = re.compile(r"^\s*---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _find_default_path() -> Path:
+    """Find ScienceEvidence.md by walking up from this file's location.
+
+    More robust than counting parent.parent.parent levels — works regardless
+    of install layout as long as ScienceEvidence.md is in a parent directory.
+    """
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        candidate = current / "ScienceEvidence.md"
+        if candidate.exists():
+            return candidate
+        current = current.parent
+    raise ValueError(
+        f"ScienceEvidence.md not found in any parent directory of {Path(__file__)}"
+    )
+
+
+def load_science_config(path: Path | None = None) -> ScienceConfig:
+    """Load and validate ScienceEvidence.md YAML frontmatter into ScienceConfig.
+
+    Called ONCE per process at startup (Composition Root pattern).
+    Pass the returned ScienceConfig as a parameter to all internal functions —
+    do NOT create a module-level global singleton.
+
+    Args:
+        path: Path to ScienceEvidence.md. Defaults to auto-discovery by
+              walking up from this file's location.
+
+    Returns:
+        Validated ScienceConfig instance.
+
+    Raises:
+        ValueError: If file not found, YAML frontmatter is missing or malformed,
+                    or data fails Pydantic validation.
+    """
+    if path is None:
+        path = _find_default_path()
+
+    if not path.exists():
+        raise ValueError(f"ScienceEvidence.md not found at {path}")
+
+    raw = path.read_text(encoding="utf-8").lstrip("\ufeff")
+    match = _FRONTMATTER_RE.match(raw)
+    if not match:
+        raise ValueError(
+            f"No valid YAML frontmatter in {path}. "
+            "File must begin with a '---' block containing YAML."
+        )
+
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Malformed YAML frontmatter in {path}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"YAML frontmatter in {path} must be a mapping, got {type(data).__name__}"
+        )
+
+    try:
+        return ScienceConfig(**data)
+    except Exception as exc:
+        raise ValueError(
+            f"ScienceEvidence.md at {path} failed validation: {exc}"
+        ) from exc

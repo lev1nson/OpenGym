@@ -1,0 +1,27 @@
+[project]
+name = "gym-coach-brain"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.18.4",
+    "loguru>=0.7.3",
+    "pydantic[yaml]>=2.0",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.48",
+    "torch>=2.10.0",
+]
+
+[project.scripts]
+gym-coach-brain = "gym_coach_brain:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+]

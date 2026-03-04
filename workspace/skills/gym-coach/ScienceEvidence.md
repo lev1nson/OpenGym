@@ -1,0 +1,1 @@
+There will be LLM recomendadtions and rules for a training program creation later - Nedd to be developed

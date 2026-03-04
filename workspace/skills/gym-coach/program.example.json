@@ -1,0 +1,24 @@
+{
+  "days": [
+    {
+      "name": "Push",
+      "exercises": [
+        {"name": "Bench Press", "targetSets": 3, "targetReps": "8-10"},
+        {"name": "Overhead Press", "targetSets": 3, "targetReps": "6-10"}
+      ]
+    },
+    {
+      "name": "Pull",
+      "exercises": [
+        {"name": "Pull-up", "targetSets": 4, "targetReps": "6-12"},
+        {"name": "Barbell Row", "targetSets": 3, "targetReps": "8-12"}
+      ]
+    }
+  ],
+  "exerciseAliases": {
+    "bench": "Bench Press",
+    "жим": "Bench Press",
+    "oHP": "Overhead Press",
+    "ряд": "Barbell Row"
+  }
+}
