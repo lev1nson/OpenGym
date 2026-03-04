@@ -5,6 +5,8 @@
   **A production-minded open template for LLM-native product development**
 
   [![Status](https://img.shields.io/badge/status-active%20template-22c55e)](#)
+  [![GitHub stars](https://img.shields.io/github/stars/lev1nson/OpenGym?style=flat)](https://github.com/lev1nson/OpenGym/stargazers)
+  [![GitHub forks](https://img.shields.io/github/forks/lev1nson/OpenGym?style=flat)](https://github.com/lev1nson/OpenGym/network/members)
   [![Contributions](https://img.shields.io/badge/contributions-welcome-3b82f6)](CONTRIBUTING.md)
   [![License](https://img.shields.io/badge/license-MIT-black)](LICENSE)
 </div>
