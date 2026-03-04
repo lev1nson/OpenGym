@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/opengym-banner.svg" alt="OpenGym banner" width="100%" />
+  <img src="logo.png" alt="OpenGym logo" width="100%" />
 
   # OpenGym
   **Open template-репозиторий для LLM-проектов**
