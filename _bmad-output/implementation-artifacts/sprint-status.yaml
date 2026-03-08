@@ -43,7 +43,7 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # ─── Epic 1: Научная методология ────────────────────────────────────────────
-  epic-1: in-progress
+  epic-1: done
   1-1-research-sports-science: done
   1-2-yaml-schema-design: done
   1-2-5-core-science-pydantic: done
@@ -51,37 +51,38 @@ development_status:
   epic-1-retrospective: optional
 
   # ─── Epic 2: База знаний и мастер-данные ────────────────────────────────────
-  epic-2: in-progress
-  2-1-muscles-taxonomy: in-progress
-  2-2-exercise-library: backlog
-  2-3-equipment-catalog: backlog
-  2-4-ml-features-spec: backlog
+  epic-2: done
+  2-1-muscles-taxonomy: done
+  2-2-exercise-library: done
+  2-3-equipment-catalog: done
+  2-4-ml-features-spec: done
   epic-2-retrospective: optional
 
   # ─── Epic 3: Основа проекта и профиль атлета ────────────────────────────────
   # NOTE: Stories 3.1-3.2 must run BEFORE Epic 2; Stories 3.3-3.5 AFTER Epic 2
-  epic-3: in-progress
+  epic-3: done
   3-1-project-init: done
   3-2-data-layer-sqlalchemy: done
-  3-3-science-config-loader: backlog
-  3-4-onboarding-template: backlog
-  3-5-onboarding-api-handlers: backlog
-  epic-3-retrospective: optional
+  3-3-science-config-loader: done
+  3-4-onboarding-template: done
+  3-5-onboarding-api-handlers: done
+  epic-3-retrospective: done
 
   # ─── Epic 4: Детерминированное тренировочное ядро ───────────────────────────
-  epic-4: backlog
-  4-1-apre-double-progression: backlog
-  4-2-puos-validator: backlog
-  4-3-readiness-log: backlog
-  4-4-methodology-selector: backlog
-  4-5-adaptation-engine: backlog
-  4-6-recap-summary: backlog
-  4-7-workout-planner: backlog
+  epic-4: in-progress
+  4-1-apre-double-progression: done
+
+  4-2-puos-validator: review
+  4-3-readiness-log: in-progress
+  4.4-methodology-selector: done
+  4-5-adaptation-engine: in-progress
+  4-6-recap-summary: ready-for-dev
+  4-7-workout-planner: ready-for-dev
   epic-4-retrospective: optional
 
   # ─── Epic 5: AI-персонализация нагрузок ─────────────────────────────────────
-  epic-5: backlog
-  5-1-ml-data-layer: backlog
+  epic-5: in-progress
+  5-1-ml-data-layer: ready-for-dev
   5-2-rpe-model-pytorch: backlog
   5-3-ml-worker-daemon: backlog
   5-4-model-versioning: backlog

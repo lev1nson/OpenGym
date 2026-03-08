@@ -4,6 +4,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from gym_coach_brain.exceptions import ConfigError
+
 
 class PUOSConfig(BaseModel):
     """Per-Unique-Output-per-Session volume limits.
@@ -48,7 +50,7 @@ class RecoveryConfig(BaseModel):
     def weights_sum_to_one(self) -> "RecoveryConfig":
         total = self.hrv_weight + self.sleep_weight + self.stress_weight
         if abs(total - 1.0) > 1e-9:
-            raise ValueError(
+            raise ConfigError(
                 f"Recovery weights must sum to 1.0, got {total:.4f} "
                 f"(hrv={self.hrv_weight}, sleep={self.sleep_weight}, "
                 f"stress={self.stress_weight})"
@@ -90,6 +92,23 @@ class PlanningConfig(BaseModel):
     min_rest_days_compound: int = Field(ge=0)
 
 
+class MLConfig(BaseModel):
+    """ML thresholds for Adaptation Engine.
+
+    confidence_threshold: MC Dropout confidence score below which the
+        Adaptation Engine falls back to Double Progression instead of using
+        the ML RPE prediction. Architecture ADR-001.
+    rpe_easy_threshold: RPE below this value means athlete has spare capacity
+        → increment weight (Double Progression step). Default: 7.0.
+    rpe_hard_threshold: RPE above this value means athlete is near failure
+        → hold or reduce weight. Default: 8.5.
+    """
+
+    confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
+    rpe_easy_threshold: float = Field(default=7.0, ge=1.0, le=10.0)
+    rpe_hard_threshold: float = Field(default=8.5, ge=1.0, le=10.0)
+
+
 class ExerciseConfig(BaseModel):
     """Exercise-specific overrides.
 
@@ -98,6 +117,21 @@ class ExerciseConfig(BaseModel):
     """
 
     smh_eligible: bool = True
+
+
+class EquipmentIncrementsConfig(BaseModel):
+    """Equipment weight increment steps for rounding.
+
+    Each value defines the minimum meaningful weight step for that equipment type.
+    Used by core/weight_utils.py to round target weights to physically achievable values.
+
+    Defaults match standard gym plate availability.
+    """
+
+    barbell: float = Field(default=2.5, gt=0.0)
+    dumbbell: float = Field(default=1.0, gt=0.0)
+    machine: float = Field(default=5.0, gt=0.0)
+    cable: float = Field(default=2.5, gt=0.0)
 
 
 class ScienceConfig(BaseModel):
@@ -114,6 +148,10 @@ class ScienceConfig(BaseModel):
     exercises: dict[str, ExerciseConfig]
     methodologies: MethodologiesConfig
     planning: PlanningConfig
+    equipment_increments: EquipmentIncrementsConfig = Field(default_factory=EquipmentIncrementsConfig)
+    ml: MLConfig = Field(default_factory=MLConfig)
+    plateau_detection_sessions: int = Field(default=3, ge=1)
+    initial_weight_table: dict[str, dict[str, float]] = {}
 
 
 _FRONTMATTER_RE = re.compile(r"^\s*---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -131,7 +169,7 @@ def _find_default_path() -> Path:
         if candidate.exists():
             return candidate
         current = current.parent
-    raise ValueError(
+    raise ConfigError(
         f"ScienceEvidence.md not found in any parent directory of {Path(__file__)}"
     )
 
@@ -151,19 +189,19 @@ def load_science_config(path: Path | None = None) -> ScienceConfig:
         Validated ScienceConfig instance.
 
     Raises:
-        ValueError: If file not found, YAML frontmatter is missing or malformed,
+        ConfigError: If file not found, YAML frontmatter is missing or malformed,
                     or data fails Pydantic validation.
     """
     if path is None:
         path = _find_default_path()
 
     if not path.exists():
-        raise ValueError(f"ScienceEvidence.md not found at {path}")
+        raise ConfigError(f"ScienceEvidence.md not found at {path}")
 
     raw = path.read_text(encoding="utf-8").lstrip("\ufeff")
     match = _FRONTMATTER_RE.match(raw)
     if not match:
-        raise ValueError(
+        raise ConfigError(
             f"No valid YAML frontmatter in {path}. "
             "File must begin with a '---' block containing YAML."
         )
@@ -171,16 +209,16 @@ def load_science_config(path: Path | None = None) -> ScienceConfig:
     try:
         data = yaml.safe_load(match.group(1))
     except yaml.YAMLError as exc:
-        raise ValueError(f"Malformed YAML frontmatter in {path}: {exc}") from exc
+        raise ConfigError(f"Malformed YAML frontmatter in {path}: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError(
+        raise ConfigError(
             f"YAML frontmatter in {path} must be a mapping, got {type(data).__name__}"
         )
 
     try:
         return ScienceConfig(**data)
     except Exception as exc:
-        raise ValueError(
+        raise ConfigError(
             f"ScienceEvidence.md at {path} failed validation: {exc}"
         ) from exc

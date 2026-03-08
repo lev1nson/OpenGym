@@ -59,66 +59,73 @@ def apply_seed_data(conn):
         ('Cable Fly Station', 'cable',              0, 1),
         ('Bodyweight',        'bodyweight',         1, 1)
     """))
-    conn.execute(text("""
-        INSERT INTO exercises
-            (name, primary_muscle_id, movement_pattern_id,
-             secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
-        VALUES
-        ('Push-up',              1, 1, '[5]',     1, 1, 'bodyweight'),
-        ('Bench Press',          1, 1, '[3,5]',   1, 1, 'barbell'),
-        ('Dumbbell Fly',         1, 1, '[]',      0, 1, 'dumbbell'),
-        ('Incline Dumbbell Press',1,1, '[3,5]',   1, 1, 'dumbbell'),
-        ('Inverted Row',         2, 3, '[4]',     1, 1, 'bodyweight'),
-        ('Pull-up',              2, 4, '[4]',     1, 1, 'pullup_bar'),
-        ('Barbell Row',          2, 3, '[4]',     1, 1, 'barbell'),
-        ('Cable Row',            2, 3, '[4]',     1, 0, 'cable'),
-        ('Deadlift',             2, 6, '[7,8]',   1, 1, 'barbell'),
-        ('Pike Push-up',         3, 2, '[5]',     0, 0, 'bodyweight'),
-        ('Overhead Press',       3, 2, '[5]',     1, 0, 'barbell'),
-        ('Lateral Raise',        3, 2, '[]',      0, 0, 'dumbbell'),
-        ('Bodyweight Chin-up',   4, 4, '[2]',     1, 1, 'bodyweight'),
-        ('Chin-up',              4, 4, '[2]',     1, 1, 'pullup_bar'),
-        ('Dumbbell Curl',        4, 3, '[]',      0, 1, 'dumbbell'),
-        ('Resistance Band Curl', 4, 3, '[]',      0, 1, 'resistance_band'),
-        ('Dip',                  5, 1, '[1,3]',   1, 1, 'dips_bar'),
-        ('Diamond Push-up',      5, 1, '[1]',     0, 1, 'bodyweight'),
-        ('Tricep Pushdown',      5, 1, '[]',      0, 1, 'cable'),
-        ('Bodyweight Squat',     6, 5, '[8]',     1, 1, 'bodyweight'),
-        ('Barbell Squat',        6, 5, '[7,8]',   1, 1, 'barbell'),
-        ('Leg Press',            6, 5, '[8]',     1, 1, 'machine'),
-        ('Nordic Curl',          7, 6, '[8]',     0, 1, 'bodyweight'),
-        ('Romanian Deadlift',    7, 6, '[8]',     1, 1, 'barbell'),
-        ('Good Morning',         7, 6, '[2]',     1, 1, 'barbell'),
-        ('Glute Bridge',         8, 6, '[7]',     0, 1, 'bodyweight'),
-        ('Hip Thrust',           8, 6, '[7]',     1, 1, 'barbell'),
-        ('Cable Pull-Through',   8, 6, '[7]',     0, 1, 'cable'),
-        ('Calf Raise (standing)',9, 5, '[]',      0, 1, 'bodyweight'),
-        ('Seated Calf Raise',    9, 5, '[]',      0, 1, 'machine'),
-        ('Dumbbell Calf Raise',  9, 5, '[]',      0, 1, 'dumbbell'),
-        ('Plank',                10,7, '[]',      0, 0, 'bodyweight'),
-        ('Hanging Leg Raise',    10,4, '[]',      0, 0, 'pullup_bar'),
-        ('Ab Wheel Rollout',     10,7, '[]',      0, 1, 'bodyweight')
-    """))
-    conn.execute(text("""
-        INSERT INTO exercises
-            (name, primary_muscle_id, movement_pattern_id,
-             secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
-        SELECT 'Prone Y-Raise',
-               (SELECT id FROM muscle_groups WHERE name='trapezius'),
-               (SELECT id FROM movement_patterns WHERE name='carry'),
-               '[]', 0, 0, 'bodyweight'
-        WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE name='Prone Y-Raise')
-    """))
-    conn.execute(text("""
-        INSERT INTO exercises
-            (name, primary_muscle_id, movement_pattern_id,
-             secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
-        SELECT 'Superman Hold',
-               (SELECT id FROM muscle_groups WHERE name='lower_back'),
-               (SELECT id FROM movement_patterns WHERE name='hinge'),
-               '[]', 0, 0, 'bodyweight'
-        WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE name='Superman Hold')
-    """))
+    # Resolve name → id for all muscle groups and movement patterns
+    mg_ids = {
+        name: conn.execute(text("SELECT id FROM muscle_groups WHERE name=:n"), {"n": name}).scalar()
+        for name in (
+            "chest", "back", "shoulders", "biceps", "triceps",
+            "quadriceps", "hamstrings", "glutes", "calves", "abs",
+            "trapezius", "lower_back",
+        )
+    }
+    mp_ids = {
+        name: conn.execute(text("SELECT id FROM movement_patterns WHERE name=:n"), {"n": name}).scalar()
+        for name in (
+            "horizontal_push", "vertical_push", "horizontal_pull",
+            "vertical_pull", "squat", "hinge", "carry",
+        )
+    }
+
+    # (name, primary_muscle, movement_pattern, secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
+    exercises = [
+        ("Push-up",               "chest",       "horizontal_push", "[]",     1, 1, "bodyweight"),
+        ("Bench Press",           "chest",       "horizontal_push", "[]",     1, 1, "barbell"),
+        ("Dumbbell Fly",          "chest",       "horizontal_push", "[]",     0, 1, "dumbbell"),
+        ("Incline Dumbbell Press","chest",       "horizontal_push", "[]",     1, 1, "dumbbell"),
+        ("Inverted Row",          "back",        "horizontal_pull", "[]",     1, 1, "bodyweight"),
+        ("Pull-up",               "back",        "vertical_pull",   "[]",     1, 1, "pullup_bar"),
+        ("Barbell Row",           "back",        "horizontal_pull", "[]",     1, 1, "barbell"),
+        ("Cable Row",             "back",        "horizontal_pull", "[]",     1, 0, "cable"),
+        ("Deadlift",              "back",        "hinge",           "[]",     1, 1, "barbell"),
+        ("Pike Push-up",          "shoulders",   "vertical_push",   "[]",     0, 0, "bodyweight"),
+        ("Overhead Press",        "shoulders",   "vertical_push",   "[]",     1, 0, "barbell"),
+        ("Lateral Raise",         "shoulders",   "vertical_push",   "[]",     0, 0, "dumbbell"),
+        ("Bodyweight Chin-up",    "biceps",      "vertical_pull",   "[]",     1, 1, "bodyweight"),
+        ("Chin-up",               "biceps",      "vertical_pull",   "[]",     1, 1, "pullup_bar"),
+        ("Dumbbell Curl",         "biceps",      "horizontal_pull", "[]",     0, 1, "dumbbell"),
+        ("Resistance Band Curl",  "biceps",      "horizontal_pull", "[]",     0, 1, "resistance_band"),
+        ("Dip",                   "triceps",     "horizontal_push", "[]",     1, 1, "dips_bar"),
+        ("Diamond Push-up",       "triceps",     "horizontal_push", "[]",     0, 1, "bodyweight"),
+        ("Tricep Pushdown",       "triceps",     "horizontal_push", "[]",     0, 1, "cable"),
+        ("Bodyweight Squat",      "quadriceps",  "squat",           "[]",     1, 1, "bodyweight"),
+        ("Barbell Squat",         "quadriceps",  "squat",           "[]",     1, 1, "barbell"),
+        ("Leg Press",             "quadriceps",  "squat",           "[]",     1, 1, "machine"),
+        ("Nordic Curl",           "hamstrings",  "hinge",           "[]",     0, 1, "bodyweight"),
+        ("Romanian Deadlift",     "hamstrings",  "hinge",           "[]",     1, 1, "barbell"),
+        ("Good Morning",          "hamstrings",  "hinge",           "[]",     1, 1, "barbell"),
+        ("Glute Bridge",          "glutes",      "hinge",           "[]",     0, 1, "bodyweight"),
+        ("Hip Thrust",            "glutes",      "hinge",           "[]",     1, 1, "barbell"),
+        ("Cable Pull-Through",    "glutes",      "hinge",           "[]",     0, 1, "cable"),
+        ("Calf Raise (standing)", "calves",      "squat",           "[]",     0, 1, "bodyweight"),
+        ("Seated Calf Raise",     "calves",      "squat",           "[]",     0, 1, "machine"),
+        ("Dumbbell Calf Raise",   "calves",      "squat",           "[]",     0, 1, "dumbbell"),
+        ("Plank",                 "abs",         "carry",           "[]",     0, 0, "bodyweight"),
+        ("Hanging Leg Raise",     "abs",         "vertical_pull",   "[]",     0, 0, "pullup_bar"),
+        ("Ab Wheel Rollout",      "abs",         "carry",           "[]",     0, 1, "bodyweight"),
+        ("Prone Y-Raise",         "trapezius",   "carry",           "[]",     0, 0, "bodyweight"),
+        ("Superman Hold",         "lower_back",  "hinge",           "[]",     0, 0, "bodyweight"),
+    ]
+    for name, mg_name, mp_name, sec_ids, compound, stretch, equip in exercises:
+        conn.execute(text("""
+            INSERT INTO exercises
+                (name, primary_muscle_id, movement_pattern_id,
+                 secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
+            SELECT :name, :mg_id, :mp_id, :sec, :compound, :stretch, :equip
+            WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE name=:name)
+        """), {
+            "name": name, "mg_id": mg_ids[mg_name], "mp_id": mp_ids[mp_name],
+            "sec": sec_ids, "compound": compound, "stretch": stretch, "equip": equip,
+        })
     conn.commit()
 
 
@@ -142,9 +149,9 @@ def db_session_with_seed(seeded_engine):
 # ─── Coverage Tests ───────────────────────────────────────────────────────────
 
 def test_muscle_groups_count(db_session_with_seed):
-    """At least 10 MuscleGroups seeded."""
+    """At least 12 MuscleGroups seeded."""
     count = db_session_with_seed.query(MuscleGroup).count()
-    assert count >= 10, f"Expected ≥10 muscle groups, got {count}"
+    assert count >= 12, f"Expected ≥12 muscle groups, got {count}"
 
 
 def test_movement_patterns_count(db_session_with_seed):
@@ -168,7 +175,7 @@ def test_exercises_count(db_session_with_seed):
 def test_each_muscle_group_has_bodyweight_exercise(db_session_with_seed):
     """Every MuscleGroup has at least one Exercise with equipment_type=bodyweight."""
     muscle_groups = db_session_with_seed.query(MuscleGroup).all()
-    assert len(muscle_groups) >= 10
+    assert len(muscle_groups) >= 12
 
     for mg in muscle_groups:
         bodyweight_count = (

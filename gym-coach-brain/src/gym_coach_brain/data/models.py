@@ -6,6 +6,7 @@ ALL schema changes must be made here first, then regenerated via:
 """
 import json
 from enum import Enum
+from functools import lru_cache
 
 from sqlalchemy import (
     Boolean,
@@ -91,7 +92,12 @@ class UserProfile(Base):
     __tablename__ = "user_profiles"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    age = Column(Integer, nullable=True)
+    goal = Column(String, nullable=True)
+    experience_level = Column(String, nullable=True)  # beginner/intermediate/advanced
     bodyweight_kg = Column(Float, nullable=True)
+    sleep_quality_score = Column(Float, nullable=True)
+    stress_score = Column(Float, nullable=True)
     # JSON dict {movement_pattern_name: float} — starting weight coefficients
     initial_weight_coefficients = Column(Text, nullable=True)
     # JSON list of EquipmentType values
@@ -173,6 +179,10 @@ class Exercise(Base):
     @hybrid_property
     def secondary_muscle_id_list(self) -> list:
         """JSON-decoded list of secondary MuscleGroup IDs."""
+        return self._get_cached_secondary_muscle_ids()
+
+    @lru_cache(maxsize=32)
+    def _get_cached_secondary_muscle_ids(self) -> list:
         return json.loads(self.secondary_muscle_ids or "[]")
 
     @secondary_muscle_id_list.setter

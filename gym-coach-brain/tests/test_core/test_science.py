@@ -10,6 +10,7 @@ from gym_coach_brain.core.science import (
     ScienceConfig,
     load_science_config,
 )
+from gym_coach_brain.exceptions import ConfigError
 
 # Path to the actual skeleton file created by Story 1.2
 SCIENCE_PATH = Path(__file__).parent.parent.parent / "ScienceEvidence.md"
@@ -87,7 +88,7 @@ def test_exercise_overrides_validation(tmp_path):
         '  min_rest_days_compound: 3\n'
         '---\n# body'
     )
-    with pytest.raises(ValueError, match="failed validation"):
+    with pytest.raises(ConfigError, match="failed validation"):
         load_science_config(bad)
 
 
@@ -110,6 +111,17 @@ def test_planning_config_types(science_config):
     assert isinstance(science_config.planning.min_rest_days_compound, int)
 
 
+def test_equipment_increments_present(science_config):
+    """Verify equipment_increments field exists and is correctly typed."""
+    inc = science_config.equipment_increments
+    assert isinstance(inc.barbell, float)
+    assert isinstance(inc.dumbbell, float)
+    assert isinstance(inc.machine, float)
+    assert isinstance(inc.cable, float)
+    assert inc.barbell == 2.5
+    assert inc.machine == 5.0
+
+
 def test_load_science_config_accepts_explicit_path():
     """load_science_config accepts explicit Path parameter."""
     config = load_science_config(SCIENCE_PATH)
@@ -120,32 +132,32 @@ def test_load_science_config_accepts_explicit_path():
 
 
 def test_load_science_config_missing_file_raises():
-    """Missing ScienceEvidence.md raises ValueError."""
-    with pytest.raises(ValueError, match="not found"):
+    """Missing ScienceEvidence.md raises ConfigError."""
+    with pytest.raises(ConfigError, match="not found"):
         load_science_config(Path("/nonexistent/ScienceEvidence.md"))
 
 
 def test_load_science_config_no_frontmatter_raises(tmp_path):
-    """File without --- frontmatter delimiters raises ValueError."""
+    """File without --- frontmatter delimiters raises ConfigError."""
     bad = tmp_path / "ScienceEvidence.md"
     bad.write_text("# No frontmatter here\nJust plain markdown.")
-    with pytest.raises(ValueError, match="No valid YAML frontmatter"):
+    with pytest.raises(ConfigError, match="No valid YAML frontmatter"):
         load_science_config(bad)
 
 
 def test_load_science_config_malformed_yaml_raises(tmp_path):
-    """File with invalid YAML raises ValueError."""
+    """File with invalid YAML raises ConfigError."""
     bad = tmp_path / "ScienceEvidence.md"
     bad.write_text("---\nversion: [unclosed\n---\n# body")
-    with pytest.raises(ValueError, match="Malformed YAML"):
+    with pytest.raises(ConfigError, match="Malformed YAML"):
         load_science_config(bad)
 
 
 def test_load_science_config_missing_required_key_raises(tmp_path):
-    """YAML frontmatter missing a required top-level key raises ValueError."""
+    """YAML frontmatter missing a required top-level key raises ConfigError."""
     bad = tmp_path / "ScienceEvidence.md"
     bad.write_text('---\nversion: "0.0.0"\n---\n# body')
-    with pytest.raises(ValueError, match="failed validation"):
+    with pytest.raises(ConfigError, match="failed validation"):
         load_science_config(bad)
 
 
@@ -179,12 +191,12 @@ def test_load_science_config_negative_value_raises(tmp_path):
         '  min_rest_days_compound: 0\n'
         '---\n# body'
     )
-    with pytest.raises(ValueError, match="failed validation"):
+    with pytest.raises(ConfigError, match="failed validation"):
         load_science_config(bad)
 
 
 def test_load_science_config_type_mismatch_raises(tmp_path):
-    """String value for int field raises ValueError."""
+    """String value for int field raises ConfigError."""
     bad = tmp_path / "ScienceEvidence.md"
     bad.write_text(
         '---\n'
@@ -213,12 +225,12 @@ def test_load_science_config_type_mismatch_raises(tmp_path):
         '  min_rest_days_compound: 0\n'
         '---\n# body'
     )
-    with pytest.raises(ValueError, match="failed validation"):
+    with pytest.raises(ConfigError, match="failed validation"):
         load_science_config(bad)
 
 
 def test_load_science_config_invalid_recovery_weights_raises(tmp_path):
-    """Recovery weights not summing to 1.0 raise ValueError."""
+    """Recovery weights not summing to 1.0 raise ConfigError."""
     bad = tmp_path / "ScienceEvidence.md"
     bad.write_text(
         '---\n'
@@ -247,5 +259,22 @@ def test_load_science_config_invalid_recovery_weights_raises(tmp_path):
         '  min_rest_days_compound: 3\n'
         '---\n# body'
     )
-    with pytest.raises(ValueError, match="failed validation"):
+    with pytest.raises(ConfigError, match="failed validation"):
         load_science_config(bad)
+
+
+# ── mock_science_config fixture tests ─────────────────────────────────────────
+
+
+def test_mock_science_config_fixture(mock_science_config):
+    """Verifies mock_science_config fixture is valid and injectable."""
+    assert isinstance(mock_science_config, ScienceConfig)
+    assert mock_science_config.version == "test-1.0"
+    assert mock_science_config.puos.max_sets_per_group == 11
+
+
+def test_science_config_is_injectable(mock_science_config):
+    """ScienceConfig is passed as parameter — not a singleton."""
+    def some_function(science: ScienceConfig) -> int:
+        return science.puos.max_sets_per_group
+    assert some_function(mock_science_config) == 11

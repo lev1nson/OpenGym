@@ -21,6 +21,7 @@ from gym_coach_brain.data.models import (
     WorkoutSession,
     WorkoutSet,
 )
+from gym_coach_brain.data.seed import seed_taxonomy
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -581,24 +582,20 @@ SMH_GROUPS = {"chest", "back", "biceps", "triceps", "quadriceps", "hamstrings", 
 @pytest.fixture
 def seeded_taxonomy_session():
     """In-memory session with taxonomy seed data (muscle_groups + movement_patterns)."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
-    from gym_coach_brain.data.models import Base
-    from gym_coach_brain.data.seed import seed_all
-
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
-        seed_all(session)
+        seed_taxonomy(session)
         session.commit()
         yield session
 
 
 def test_all_12_muscle_groups_present(seeded_taxonomy_session):
-    """All 12 required muscle groups are present after seed_taxonomy."""
+    """Exactly 12 required muscle groups are present after seed_taxonomy (no more, no less)."""
     names = {mg.name for mg in seeded_taxonomy_session.query(MuscleGroup).all()}
-    missing = REQUIRED_MUSCLE_GROUPS - names
-    assert not missing, f"Missing muscle groups: {missing}"
+    assert names == REQUIRED_MUSCLE_GROUPS, (
+        f"Missing: {REQUIRED_MUSCLE_GROUPS - names}, Extra: {names - REQUIRED_MUSCLE_GROUPS}"
+    )
 
 
 def test_all_7_movement_patterns_present(seeded_taxonomy_session):
@@ -632,10 +629,9 @@ def test_stretch_mediated_flags_correct(seeded_taxonomy_session):
 
 
 def test_seed_taxonomy_idempotent(seeded_taxonomy_session):
-    """seed_all can be called twice without errors or duplicates."""
-    from gym_coach_brain.data.seed import seed_all
+    """seed_taxonomy can be called twice without errors or duplicates."""
     # Second call should insert 0 new records
-    result = seed_all(seeded_taxonomy_session)
+    result = seed_taxonomy(seeded_taxonomy_session)
     seeded_taxonomy_session.commit()
     assert result["muscle_groups"] == 0, "Second seed call should insert 0 muscle groups"
     assert result["movement_patterns"] == 0, "Second seed call should insert 0 patterns"

@@ -21,6 +21,12 @@ recovery:
 
 exercises: {}                  # dict — exercise overrides. Example: {"deadlift": {"smh_eligible": false}}
 
+equipment_increments:
+  barbell: 2.5    # float — минимальный шаг барбелла (стандартная блинная пара) [кг]
+  dumbbell: 1.0   # float — минимальный шаг гантели (микро-блин) [кг]
+  machine: 5.0    # float — минимальный шаг тренажёра [кг]
+  cable: 2.5      # float — минимальный шаг кроссовера [кг]
+
 methodologies:
   strength:
     rep_min: 1                 # int — minimum reps (Schoenfeld & Grgic 2021, PMC7927075)
@@ -41,6 +47,42 @@ methodologies:
 planning:
   min_rest_days_per_muscle_group: 2  # int — min rest days (isolation; Monteiro 2018, PMC6015912; 48h = 2 days)
   min_rest_days_compound: 3          # int — min rest days (multi-joint; De Salles 2010, PMC6719818; 72h = 3 days)
+
+ml:
+  confidence_threshold: 0.6   # float — MC Dropout confidence below which fallback to Double Progression (architecture ADR-001)
+  rpe_easy_threshold: 7.0     # float — RPE below this → athlete has spare capacity, increment weight
+  rpe_hard_threshold: 8.5     # float — RPE above this → near failure, hold or reduce weight
+
+plateau_detection_sessions: 3  # int — number of consecutive sessions without progress to trigger plateau warning
+
+initial_weight_table:
+  # Starting weight coefficients by experience level and movement pattern.
+  # Formula: bodyweight_kg * coefficient → starting weight in kg
+  # Keys match MovementPattern.name values from seed.py
+  beginner:
+    horizontal_push: 0.40
+    vertical_push: 0.30
+    horizontal_pull: 0.35
+    vertical_pull: 0.30
+    squat: 0.60
+    hinge: 0.50
+    carry: 0.25
+  intermediate:
+    horizontal_push: 0.70
+    vertical_push: 0.55
+    horizontal_pull: 0.60
+    vertical_pull: 0.55
+    squat: 1.00
+    hinge: 0.90
+    carry: 0.45
+  advanced:
+    horizontal_push: 1.00
+    vertical_push: 0.80
+    horizontal_pull: 0.90
+    vertical_pull: 0.80
+    squat: 1.50
+    hinge: 1.30
+    carry: 0.65
 ---
 
 # ScienceEvidence

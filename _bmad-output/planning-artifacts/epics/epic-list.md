@@ -35,6 +35,11 @@ gym-coach-brain полностью интегрирован как OpenClaw ск
 **Requires:** Epic 5 (завершён)
 **FRs covered:** FR11, FR12
 
+## Epic 7: Simulation & Validation Engine
+Создание полноценного симулятора тренировочного процесса для предиктивной валидации алгоритмов. Система должна позволять «прокручивать» недели тренировок для синтетических профилей атлетов, выявляя логические ошибки и неэффективность методик.
+**Requires:** Epic 1 (завершён), Epic 2 (в процессе), Epic 3 (частично)
+**FRs covered:** FR5, FR6, FR8 (валидация логики), Quality Assurance
+
 ---
 
 ## Порядок выполнения (фактический)
@@ -43,6 +48,7 @@ gym-coach-brain полностью интегрирован как OpenClaw ск
 Epic 1              → ScienceEvidence.md (независим)
 Epic 3 [3.1, 3.2]  → uv init + SQLAlchemy models + Alembic (до Epic 2!)
 Epic 2              → Seed данные: мышцы, упражнения, оборудование, ML-фичи
+Epic 7 [7.1]        → Simulation Engine (валидация 2.1 и будущего ядра)
 Epic 3 [3.3–3.5]   → ScienceConfig loader, Onboarding, API handlers
 Epic 4              → Детерминированное ядро (APRE, PUOS, Readiness, Adaptation)
 Epic 5              → ML Worker, RPEModel, EWC, версионирование

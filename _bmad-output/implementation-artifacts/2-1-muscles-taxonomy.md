@@ -1,6 +1,6 @@
 # Story 2.1: Taxonomy мышц и паттернов движения
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -58,35 +58,44 @@ lower_back | core  | is_push=False | is_pull=True  | stretch_mediated=False  ←
 
 ## Tasks / Subtasks
 
-- [ ] **Верифицировать prerequisites** (AC: baseline)
-  - [ ] `cd gym-coach-brain && uv run pytest` — убедиться что 63 теста PASS
-  - [ ] `uv run python -c "from gym_coach_brain.data.models import MuscleGroup; print('OK')"` — models доступны
-  - [ ] Проверить что `tests/conftest.py` НЕ существует (его нет — каждый тест-файл определяет свои fixtures)
+- [x] **Верифицировать prerequisites** (AC: baseline)
+  - [x] `cd gym-coach-brain && uv run pytest` — убедиться что 63 теста PASS
+  - [x] `uv run python -c "from gym_coach_brain.data.models import MuscleGroup; print('OK')"` — models доступны
+  - [x] Проверить что `tests/conftest.py` НЕ существует (его нет — каждый тест-файл определяет свои fixtures)
 
-- [ ] **Создать `src/gym_coach_brain/data/seed.py`** (AC: seed через SQLAlchemy session)
-  - [ ] Создать файл `src/gym_coach_brain/data/seed.py`
-  - [ ] Реализовать `seed_taxonomy(session: Session) -> None` с get-or-create паттерном для 12 MuscleGroup + 7 MovementPattern
-  - [ ] Функция idempotent: `existing = session.query(MuscleGroup).filter_by(name=name).first(); if not existing: session.add(...)`
-  - [ ] Добавить `seed_all(session)` как точку входа
-  - [ ] Добавить `if __name__ == "__main__":` для ручного запуска
+- [x] **Создать `src/gym_coach_brain/data/seed.py`** (AC: seed через SQLAlchemy session)
+  - [x] Создать файл `src/gym_coach_brain/data/seed.py`
+  - [x] Реализовать `seed_taxonomy(session: Session) -> None` с get-or-create паттерном для 12 MuscleGroup + 7 MovementPattern
+  - [x] Функция idempotent: `existing = session.query(MuscleGroup).filter_by(name=name).first(); if not existing: session.add(...)`
+  - [x] Добавить `seed_all(session)` как точку входа
+  - [x] Добавить `if __name__ == "__main__":` для ручного запуска
 
-- [ ] **Добавить bodyweight упражнения для новых групп в test_seed_coverage.py** (AC: every muscle group has bodyweight exercise)
-  - [ ] Открыть `tests/test_data/test_seed_coverage.py`
-  - [ ] В функцию `apply_seed_data(conn)` добавить MuscleGroup записи для trapezius и lower_back (в INSERT INTO muscle_groups)
-  - [ ] Добавить bodyweight Exercise для `trapezius`: "Prone Y-Raise" (bodyweight, movement_pattern=carry(7), primary_muscle=trapezius_id)
-  - [ ] Добавить bodyweight Exercise для `lower_back`: "Superman Hold" (bodyweight, movement_pattern=hinge(6), primary_muscle=lower_back_id)
-  - [ ] Обновить `test_muscle_groups_count` с `>= 12` если нужно (или оставить `>= 10` — оба верны)
+- [x] **Добавить bodyweight упражнения для новых групп в test_seed_coverage.py** (AC: every muscle group has bodyweight exercise)
+  - [x] Открыть `tests/test_data/test_seed_coverage.py`
+  - [x] В функцию `apply_seed_data(conn)` добавить MuscleGroup записи для trapezius и lower_back (в INSERT INTO muscle_groups)
+  - [x] Добавить bodyweight Exercise для `trapezius`: "Prone Y-Raise" (bodyweight, movement_pattern=carry(7), primary_muscle=trapezius_id)
+  - [x] Добавить bodyweight Exercise для `lower_back`: "Superman Hold" (bodyweight, movement_pattern=hinge(6), primary_muscle=lower_back_id)
+  - [x] Обновить `test_muscle_groups_count` с `>= 12` если нужно (или оставить `>= 10` — оба верны)
 
-- [ ] **Добавить taxonomy-verification тесты в `tests/test_data/test_models.py`** (AC: все группы присутствуют)
-  - [ ] Добавить fixture `seeded_taxonomy_session` (в test_models.py или conftest.py) — использует `seed_taxonomy()` из data/seed.py
-  - [ ] Добавить `test_all_12_muscle_groups_present(seeded_taxonomy_session)`: проверяет что все 12 named groups существуют
-  - [ ] Добавить `test_muscle_group_is_push_is_pull_flags(seeded_taxonomy_session)`: проверяет chest.is_push=True, back.is_pull=True, trapezius.is_pull=True, lower_back.is_pull=True
-  - [ ] Добавить `test_all_7_movement_patterns_present(seeded_taxonomy_session)`: проверяет все 7 названий
-  - [ ] `uv run pytest tests/test_data/test_models.py -v` — все тесты PASS включая новые
+- [x] **Добавить taxonomy-verification тесты в `tests/test_data/test_models.py`** (AC: все группы присутствуют)
+  - [x] Добавить fixture `seeded_taxonomy_session` (в test_models.py или conftest.py) — использует `seed_taxonomy()` из data/seed.py
+  - [x] Добавить `test_all_12_muscle_groups_present(seeded_taxonomy_session)`: проверяет что все 12 named groups существуют
+  - [x] Добавить `test_muscle_group_is_push_is_pull_flags(seeded_taxonomy_session)`: проверяет chest.is_push=True, back.is_pull=True, trapezius.is_pull=True, lower_back.is_pull=True
+  - [x] Добавить `test_all_7_movement_patterns_present(seeded_taxonomy_session)`: проверяет все 7 названий
+  - [x] `uv run pytest tests/test_data/test_models.py -v` — все тесты PASS включая новые
 
-- [ ] **Финальная верификация**
-  - [ ] `uv run pytest` — все тесты PASS (63 existing + новые taxonomy тесты)
-  - [ ] Убедиться что нет созданных `gym_coach.sqlite` файлов в project root
+- [x] **Финальная верификация**
+  - [x] `uv run pytest` — все тесты PASS (63 existing + новые taxonomy тесты)
+  - [x] Убедиться что нет созданных `gym_coach.sqlite` файлов в project root
+
+### Review Follow-ups (AI)
+- [x] [AI-Review][MEDIUM] Rename `seed_all` to `seed_taxonomy` in `seed.py` to match AC requirements [gym-coach-brain/src/gym_coach_brain/data/seed.py]
+- [x] [AI-Review][MEDIUM] Update `test_muscle_groups_count` in `test_seed_coverage.py` to strictly check for `>= 12` groups [gym-coach-brain/tests/test_data/test_seed_coverage.py:168]
+- [x] [AI-Review][MEDIUM] Improve `test_all_12_muscle_groups_present` to verify EXACT set of groups, not just subset [gym-coach-brain/tests/test_data/test_models.py:604]
+- [x] [AI-Review][LOW] Unify `apply_seed_data` logic to use subqueries for ALL groups, not just new ones [gym-coach-brain/tests/test_data/test_seed_coverage.py:24]
+- [x] [AI-Review][LOW] Move inline imports to top of file in `test_models.py` [gym-coach-brain/tests/test_data/test_models.py:641]
+- [x] [AI-Review][LOW] Remove hardcoded DB path from `if __name__ == "__main__":` in `seed.py` [gym-coach-brain/src/gym_coach_brain/data/seed.py:91]
+- [x] [AI-Review][LOW] Align `_MUSCLE_GROUPS` constant name with "taxonomy entries" terminology from AC [gym-coach-brain/src/gym_coach_brain/data/seed.py:23]
 
 ## Dev Notes
 
@@ -514,10 +523,25 @@ tests/
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-sonnet-4-6
 
 ### Debug Log References
 
+No issues encountered — all code was pre-implemented correctly.
+
 ### Completion Notes List
 
+- ✅ Verified `src/gym_coach_brain/data/seed.py` exists with `seed_muscle_groups()`, `seed_movement_patterns()`, `seed_taxonomy()` — all idempotent via get-or-create pattern
+- ✅ `_TAXONOMY_GROUPS` covers all 12 groups with correct `body_region`, `is_push`, `is_pull`, `stretch_mediated` flags per AC
+- ✅ `tests/test_data/test_seed_coverage.py::apply_seed_data` refactored to use name-based ID lookups for all 36 exercises (no hardcoded primary_muscle_id / movement_pattern_id)
+- ✅ `tests/test_data/test_models.py` contains 6 taxonomy verification tests: `test_all_12_muscle_groups_present` (EXACT set), `test_all_7_movement_patterns_present`, `test_is_pull_flags_correct`, `test_is_push_flags_correct`, `test_stretch_mediated_flags_correct`, `test_seed_taxonomy_idempotent`
+- ✅ 69 tests PASS total (63 baseline + 6 new taxonomy tests)
+- ✅ No `conftest.py`, no `gym_coach.sqlite` in project root
+- ✅ No new Alembic migration — seed via SQLAlchemy session only
+- ✅ Addressed code review findings — 7 items resolved (Date: 2026-03-05)
+
 ### File List
+
+- `gym-coach-brain/src/gym_coach_brain/data/seed.py` (created; renamed `seed_all`→`seed_taxonomy`, `_MUSCLE_GROUPS`→`_TAXONOMY_GROUPS`, removed hardcoded DB path)
+- `gym-coach-brain/tests/test_data/test_models.py` (modified — taxonomy verification tests appended; imports moved to top; EXACT set assertion)
+- `gym-coach-brain/tests/test_data/test_seed_coverage.py` (modified — trapezius, lower_back added; all exercises use name-based subquery lookups; count raised to ≥12)
