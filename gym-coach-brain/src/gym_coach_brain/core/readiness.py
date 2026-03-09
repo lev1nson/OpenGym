@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
     from gym_coach_brain.core.science import ScienceConfig
     from gym_coach_brain.data.models import ReadinessLog
 
@@ -85,12 +86,10 @@ def calculate_recovery_signal(
         [Source: _bmad-output/planning-artifacts/epics/epic-4.md#Story 4.3]
     """
     # Normalize each component to [0.0, 1.0]
-    sleep_component = min(
-        readiness_log.sleep_hours / SLEEP_OPTIMAL_HOURS, 1.0
-    )
-    stress_component = (STRESS_MAX_SCALE - readiness_log.stress_level) / (
+    sleep_component = max(0.0, min(1.0, readiness_log.sleep_hours / SLEEP_OPTIMAL_HOURS))
+    stress_component = max(0.0, min(1.0, (STRESS_MAX_SCALE - readiness_log.stress_level) / (
         STRESS_MAX_SCALE - STRESS_MIN_SCALE
-    )  # stress 1→1.0, stress 10→0.0
+    )))  # stress 1→1.0, stress 10→0.0
 
     rc = science.recovery
 
@@ -106,8 +105,12 @@ def calculate_recovery_signal(
     else:
         # HRV absent: redistribute hrv_weight proportionally to sleep+stress
         non_hrv_total = rc.sleep_weight + rc.stress_weight
-        effective_sleep_w = rc.sleep_weight / non_hrv_total
-        effective_stress_w = rc.stress_weight / non_hrv_total
+        if non_hrv_total > 0:
+            effective_sleep_w = rc.sleep_weight / non_hrv_total
+            effective_stress_w = rc.stress_weight / non_hrv_total
+        else:
+            effective_sleep_w = 0.5
+            effective_stress_w = 0.5
         hrv_component = None
         raw = (
             sleep_component * effective_sleep_w
@@ -124,25 +127,24 @@ def calculate_recovery_signal(
 
 def get_recovery_signal_or_default(
     session_date: str,
-    db_session: object,
+    db_session: "Session",
     science: "ScienceConfig",
 ) -> RecoverySignal:
     """Return RecoverySignal for session_date or default (coefficient=1.0) if absent.
 
     Args:
-        session_date: ISO 8601 date string to look up in readiness_logs table
+        session_date: ISO 8601 date string (YYYY-MM-DD or with timestamp) to look up
         db_session: SQLAlchemy Session
         science: ScienceConfig for weight parameters
 
     Returns:
         RecoverySignal — either computed from log or default with coefficient=1.0
     """
-    from sqlalchemy.orm import Session as SASession
-
     from gym_coach_brain.data.models import ReadinessLog
 
-    session = db_session  # type: SASession
-    log = session.query(ReadinessLog).filter_by(session_date=session_date).first()
+    # Normalize to date-only (YYYY-MM-DD) regardless of whether a timestamp was passed
+    date_str = session_date[:10]
+    log = db_session.query(ReadinessLog).filter_by(session_date=date_str).first()
     if log is None:
         return RecoverySignal(
             coefficient=DEFAULT_RECOVERY_COEFFICIENT,

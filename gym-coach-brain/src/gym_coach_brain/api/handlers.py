@@ -379,19 +379,27 @@ def handle_readiness_log(
     if profile is None:
         return "Профиль не найден. Сначала запустите onboarding_start.", 1
 
-    # Build ReadinessLog to compute signal (not yet committed)
-    log = ReadinessLog(
-        session_date=datetime.now(timezone.utc).date().isoformat(),
-        sleep_hours=args.sleep,
-        stress_level=args.stress,
-        hrv_score=args.hrv,
-        recovery_score=0.0,  # will be overwritten
-    )
+    session_date = datetime.now(timezone.utc).date().isoformat()
+
+    # Upsert: update existing log for today rather than creating duplicate rows
+    log = session.query(ReadinessLog).filter_by(session_date=session_date).first()
+    if log is None:
+        log = ReadinessLog(
+            session_date=session_date,
+            sleep_hours=args.sleep,
+            stress_level=args.stress,
+            hrv_score=args.hrv,
+            recovery_score=0.0,
+        )
+        session.add(log)
+    else:
+        log.sleep_hours = args.sleep
+        log.stress_level = args.stress
+        log.hrv_score = args.hrv
 
     signal = calculate_recovery_signal(log, science)
     log.recovery_score = signal.coefficient
 
-    session.add(log)
     session.flush()
 
     hrv_str = f"HRV: {args.hrv:.0f}" if args.hrv is not None else "HRV: не измерен"

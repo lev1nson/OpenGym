@@ -225,3 +225,35 @@ def test_readiness_log_output_shows_hrv_not_measured_when_absent(readiness_sessi
     stdout, exit_code = handle_readiness_log(argv, readiness_session, science)
     assert exit_code == 0
     assert "не измерен" in stdout
+
+
+def test_readiness_log_upsert_same_day(readiness_session, science):
+    """Calling handle_readiness_log twice on the same day updates the row, not creates a second."""
+    argv_first = ["--sleep", "6.0", "--stress", "7"]
+    handle_readiness_log(argv_first, readiness_session, science)
+
+    argv_second = ["--sleep", "8.0", "--stress", "1", "--hrv", "80"]
+    stdout, exit_code = handle_readiness_log(argv_second, readiness_session, science)
+    assert exit_code == 0
+
+    logs = readiness_session.query(ReadinessLog).all()
+    assert len(logs) == 1, f"Expected 1 row (upsert), got {len(logs)}"
+    assert logs[0].sleep_hours == pytest.approx(8.0)
+    assert logs[0].stress_level == 1
+    assert logs[0].hrv_score == pytest.approx(80.0)
+
+
+def test_get_recovery_signal_normalizes_timestamp_input(readiness_session, science):
+    """get_recovery_signal_or_default accepts full ISO timestamp and strips to date."""
+    argv = ["--sleep", "8.0", "--stress", "1", "--hrv", "100"]
+    handle_readiness_log(argv, readiness_session, science)
+    readiness_session.flush()
+
+    # Pass full ISO timestamp — should still find the log stored as YYYY-MM-DD
+    today_timestamp = datetime.now(timezone.utc).isoformat()
+    signal = get_recovery_signal_or_default(today_timestamp, readiness_session, science)
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    log = readiness_session.query(ReadinessLog).filter_by(session_date=today).first()
+    assert log is not None, "Log not found in DB"
+    assert signal.coefficient == pytest.approx(1.0, rel=1e-6)

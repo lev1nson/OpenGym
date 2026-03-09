@@ -1,7 +1,7 @@
 """
 ML feature vector builder for RPEModel.
 
-Assembles a 14-dimensional feature vector from the database for a given
+Assembles an 18-dimensional base feature vector from the database for a given
 (exercise_id, session_id) pair. All values are numeric (float/int).
 Cold start fallbacks ensure no None/NaN values.
 
@@ -11,9 +11,13 @@ Cold start defaults:
 - sessions_count_for_exercise: 0
 - readiness_score: 5.0 (neutral recovery — midpoint of 1-10 scale)
 - days_since_last_session: 0 (first session → no gap)
+- sleep_hours: 7.5 (cold-start average sleep)
+- pre_readiness: 5 (neutral readiness button)
+- workout_hour_sin/workout_hour_cos: derived from hour=12 cold start
 """
+import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -38,7 +42,7 @@ _DEFAULT_SESSIONS_COUNT: int = 0
 
 @dataclass
 class FeatureVector:
-    """14-dimensional feature vector for RPEModel input.
+    """18-dimensional base feature vector for RPEModel input.
 
     All fields are numeric (float or int). Never None, never NaN.
     """
@@ -56,6 +60,10 @@ class FeatureVector:
     sessions_count_for_exercise: int               # total sessions with this exercise
     readiness_score: float                         # from ReadinessLog.recovery_score
     days_since_last_session: int                   # days since last completed session
+    sleep_hours: float                             # from WorkoutSession.sleep_hours
+    pre_readiness: int                             # from WorkoutSession.pre_readiness
+    workout_hour_sin: float                        # cyclic hour encoding from session_date
+    workout_hour_cos: float                        # cyclic hour encoding from session_date
 
 
 def build_feature_vector(
@@ -79,7 +87,7 @@ def build_feature_vector(
         cold_start_rpe: Fallback RPE when no history exists (default 6.0)
 
     Returns:
-        FeatureVector with all 14 features. Never raises for missing data.
+        FeatureVector with all 18 base features. Never raises for missing data.
     """
     # ── Exercise static features ───────────────────────────────────────────────
     exercise = session.get(Exercise, exercise_id)
@@ -172,14 +180,36 @@ def build_feature_vector(
     if last_session_date_row:
         try:
             last_dt = datetime.fromisoformat(last_session_date_row)
-            # Architecture rule: "НЕ datetime.now() (localtime risk)". 
-            # Use utcnow() as defined in "Write: datetime.utcnow().isoformat()" pattern.
-            now = datetime.utcnow()
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
             days_since = max(0, (now - last_dt).days)
         except (ValueError, TypeError):
             days_since = _DEFAULT_DAYS_SINCE
     else:
         days_since = _DEFAULT_DAYS_SINCE
+
+    # ── Workout session check-in features ────────────────────────────────────
+    workout_session = session.get(WorkoutSession, session_id)
+    if workout_session is not None and workout_session.sleep_hours is not None:
+        sleep_hours = float(workout_session.sleep_hours)
+    else:
+        sleep_hours = 7.5
+
+    if workout_session is not None and workout_session.pre_readiness is not None:
+        pre_readiness = int(workout_session.pre_readiness)
+    else:
+        pre_readiness = 5
+
+    hour = 12.0
+    if workout_session is not None and workout_session.session_date:
+        try:
+            workout_dt = datetime.fromisoformat(workout_session.session_date)
+            hour = workout_dt.hour + (workout_dt.minute / 60.0)
+        except (ValueError, TypeError):
+            hour = 12.0
+    workout_hour_sin = math.sin(2 * math.pi * hour / 24)
+    workout_hour_cos = math.cos(2 * math.pi * hour / 24)
 
     return FeatureVector(
         exercise_id=exercise_id,
@@ -196,4 +226,8 @@ def build_feature_vector(
         sessions_count_for_exercise=int(sessions_count),
         readiness_score=readiness_score,
         days_since_last_session=days_since,
+        sleep_hours=sleep_hours,
+        pre_readiness=pre_readiness,
+        workout_hour_sin=workout_hour_sin,
+        workout_hour_cos=workout_hour_cos,
     )
