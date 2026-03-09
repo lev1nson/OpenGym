@@ -15,6 +15,7 @@ from sqlalchemy import (
     Enum as SAEnum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -201,6 +202,12 @@ class WorkoutSession(Base):
     planned_exercises = Column(Text, nullable=True)
     # push / pull / legs / upper / lower / full_body
     split_day_label = Column(String, nullable=True)
+    # Pre-workout check-in fields (Epic 5 Contract v3, §10)
+    sleep_hours = Column(Float, nullable=True)     # hours slept: 5.0/6.5/7.5/9.0
+    pre_readiness = Column(Integer, nullable=True) # pre-workout readiness: 2/5/9
+    # Post-workout check-in fields
+    post_feeling = Column(Integer, nullable=True)  # post-workout feeling: 2/5/9; NULL if session not completed
+    is_deload = Column(Boolean, nullable=False, default=False)  # deload-week flag (from APRE logic)
     created_at = Column(
         String, nullable=False,
         server_default=text("strftime('%Y-%m-%dT%H:%M:%S', 'now')"),
@@ -266,6 +273,9 @@ class MLJob(Base):
     job_type = Column(String, nullable=False)     # "FINE_TUNE" | "PREDICT"
     status = Column(String, nullable=False, default="pending")  # pending/processing/done/failed
     session_ids = Column(Text, nullable=False)    # JSON array of session IDs
+    # Scalar session_id for PREDICT jobs — enables idempotency check (Epic 5 Contract v3, §12)
+    # NULL for FINE_TUNE jobs (those use session_ids JSON array with multiple IDs)
+    session_id = Column(Integer, ForeignKey("workout_sessions.id"), nullable=True)
     created_at = Column(
         String, nullable=False,
         server_default=text("strftime('%Y-%m-%dT%H:%M:%S', 'now')"),
@@ -281,6 +291,8 @@ class MLJob(Base):
             "status IN ('pending', 'processing', 'done', 'failed')",
             name="ck_ml_job_status",
         ),
+        Index('ix_mljob_status_type', 'status', 'job_type'),
+        UniqueConstraint('session_id', 'job_type', name='uq_mljob_session_job_type'),
     )
 
 
@@ -294,6 +306,12 @@ class RPEPrediction(Base):
     predicted_rpe = Column(Float, nullable=False)
     confidence_score = Column(Float, nullable=False)
     model_version = Column(String, nullable=False)
+    # Debug transparency and anomaly detection fields (Epic 5 Contract v2/v3)
+    core_weight_kg = Column(Float, nullable=True)         # weight from deterministic core
+    ml_weight_kg = Column(Float, nullable=True)           # weight from RPE prediction (pre-clamp)
+    ml_adjustment_kg = Column(Float, nullable=True, default=0.0)  # applied delta (0 on fallback/anomaly)
+    anomaly_flag = Column(Boolean, nullable=False, default=False)  # True if delta > max_correction_percent
+    source_label = Column(String, nullable=True)          # human-readable label: "[ядро]" / "[AI: ...]"
     created_at = Column(
         String, nullable=False,
         server_default=text("strftime('%Y-%m-%dT%H:%M:%S', 'now')"),

@@ -17,6 +17,7 @@ from gym_coach_brain.api.handlers import (
     handle_profile_show,
     handle_profile_update_equipment,
     handle_profile_update_split,
+    handle_workout_start,
 )
 from gym_coach_brain.core.science import (
     MethodologiesConfig,
@@ -28,7 +29,16 @@ from gym_coach_brain.core.science import (
     ScienceConfig,
 )
 from gym_coach_brain.core.puos import fractional_volume
-from gym_coach_brain.data.models import Base, Exercise, MuscleGroup, TrainingSplit, UserProfile
+from gym_coach_brain.data.models import (
+    Base,
+    Exercise,
+    MLJob,
+    MuscleGroup,
+    ReadinessLog,
+    TrainingSplit,
+    UserProfile,
+    WorkoutSession,
+)
 from gym_coach_brain.data.seed import seed_all, seed_exercises, seed_taxonomy
 
 
@@ -380,3 +390,75 @@ def test_profile_update_split_invalid(onboarding_session, mock_science):
 
     stdout, exit_code = handle_profile_update_split(["--split", "invalid"], onboarding_session)
     assert exit_code == 1
+
+
+def test_workout_start_persists_split_day_label_and_planned_exercises(
+    handler_session, mock_science
+):
+    profile = UserProfile(
+        onboarding_complete=True,
+        training_split=TrainingSplit.ppl,
+        available_equipment=json.dumps(["barbell", "dumbbell"]),
+        bodyweight_kg=80.0,
+        experience_level="intermediate",
+        training_days_per_week=4,
+        goal="hypertrophy",
+        initial_weight_coefficients=json.dumps({"horizontal_push": 70.0}),
+    )
+    handler_session.add(profile)
+    handler_session.flush()
+
+    readiness = ReadinessLog(
+        session_date="2026-03-09",
+        sleep_hours=8.0,
+        stress_level=2,
+        hrv_score=None,
+        recovery_score=1.0,
+    )
+    handler_session.add(readiness)
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_start(
+        ["--sleep-hours", "7.5", "--pre-readiness", "5"],
+        handler_session,
+        mock_science,
+    )
+
+    assert exit_code == 0
+    assert "id:" in stdout
+
+    workout_session = handler_session.query(WorkoutSession).one()
+    assert workout_session.status == "active"
+    assert workout_session.split_day_label == "push"
+    assert workout_session.planned_exercises is not None
+    assert workout_session.sleep_hours == pytest.approx(7.5)
+    assert workout_session.pre_readiness == 5
+
+    planned = json.loads(workout_session.planned_exercises)
+    assert planned
+    assert {"exercise_id", "exercise_name", "sets", "rep_range", "target_weight_kg"} <= set(planned[0])
+
+    ml_job = handler_session.query(MLJob).one()
+    assert ml_job.job_type == "PREDICT"
+    assert ml_job.session_id == workout_session.id
+
+
+def test_workout_start_requires_pre_checkin_args(handler_session, mock_science):
+    profile = UserProfile(
+        onboarding_complete=True,
+        training_split=TrainingSplit.ppl,
+        available_equipment=json.dumps(["barbell"]),
+        bodyweight_kg=80.0,
+        experience_level="intermediate",
+        training_days_per_week=4,
+        goal="hypertrophy",
+        initial_weight_coefficients=json.dumps({"horizontal_push": 70.0}),
+    )
+    handler_session.add(profile)
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_start([], handler_session, mock_science)
+
+    assert exit_code == 1
+    assert "--sleep-hours" in stdout
+    assert handler_session.query(WorkoutSession).count() == 0

@@ -1,6 +1,6 @@
 # Story 5.1: ML Data Layer — Job Queue
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -30,26 +30,35 @@ So that the main process and ML worker can communicate exclusively through the d
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add composite index to `MLJob` model in `data/models.py` (AC: #7)
-  - [ ] Import `Index` from `sqlalchemy` in models.py
-  - [ ] Add `Index('ix_mljob_status_type', MLJob.status, MLJob.job_type)` to `MLJob.__table_args__`
-  - [ ] Run `uv run alembic revision --autogenerate -m "add_ix_mljob_status_type"` to generate migration
+- [x] Task 1: Add composite index to `MLJob` model in `data/models.py` (AC: #7)
+  - [x] Import `Index` from `sqlalchemy` in models.py
+  - [x] Add `Index('ix_mljob_status_type', MLJob.status, MLJob.job_type)` to `MLJob.__table_args__`
+  - [x] Run `uv run alembic revision --autogenerate -m "add_ix_mljob_status_type"` to generate migration
 
-- [ ] Task 2: Implement `data/queue.py` (AC: #1–#6)
-  - [ ] `enqueue_predict(session_id: int, engine=None) -> MLJob`
-  - [ ] `enqueue_fine_tune(session_ids: list[int], engine=None) -> MLJob`
-  - [ ] `get_pending_jobs(engine=None) -> list[MLJob]` — PREDICT first, then FINE_TUNE
-  - [ ] `update_job_status(job_id: int, status: str, engine=None) -> None` — also sets `processed_at` when status is done/failed
-  - [ ] Zero imports from `gym_coach_brain.ml.*`
+- [x] Task 2: Implement `data/queue.py` (AC: #1–#6)
+  - [x] `enqueue_predict(session_id: int, engine=None) -> MLJob`
+  - [x] `enqueue_fine_tune(session_ids: list[int], engine=None) -> MLJob`
+  - [x] `get_pending_jobs(engine=None) -> list[MLJob]` — PREDICT first, then FINE_TUNE
+  - [x] `update_job_status(job_id: int, status: str, engine=None) -> None` — also sets `processed_at` when status is done/failed
+  - [x] Zero imports from `gym_coach_brain.ml.*`
 
-- [ ] Task 3: Implement `tests/test_data/test_queue.py` (AC: #8)
-  - [ ] Test `enqueue_predict` creates a PREDICT pending job
-  - [ ] Test `enqueue_fine_tune` creates a FINE_TUNE pending job with correct session_ids JSON
-  - [ ] Test `get_pending_jobs` returns PREDICT before FINE_TUNE when both present
-  - [ ] Test `get_pending_jobs` returns empty list when no pending jobs
-  - [ ] Test `update_job_status` transitions: pending→processing, pending→done, pending→failed
-  - [ ] Test `update_job_status` to done/failed sets `processed_at` field
-  - [ ] All tests use `db_engine` fixture (in-memory SQLite) — no PyTorch, no real file
+- [x] Task 3: Implement `tests/test_data/test_queue.py` (AC: #8)
+  - [x] Test `enqueue_predict` creates a PREDICT pending job
+  - [x] Test `enqueue_fine_tune` creates a FINE_TUNE pending job with correct session_ids JSON
+  - [x] Test `get_pending_jobs` returns PREDICT before FINE_TUNE when both present
+  - [x] Test `get_pending_jobs` returns empty list when no pending jobs
+  - [x] Test `update_job_status` transitions: pending→processing, pending→done, pending→failed
+  - [x] Test `update_job_status` to done/failed sets `processed_at` field
+  - [x] All tests use `db_engine` fixture (in-memory SQLite) — no PyTorch, no real file
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][HIGH] Add canonical idempotency support for `enqueue_predict`: extend `MLJob` schema with the required `session_id` contract and enforce unique `(session_id, job_type)` behavior so duplicate PREDICT jobs are not created for the same session. [gym-coach-brain/src/gym_coach_brain/data/models.py, gym-coach-brain/src/gym_coach_brain/data/queue.py]
+- [x] [AI-Review][HIGH] Implement fine-tune eligibility filtering from the Epic 5 contract: `enqueue_fine_tune` must exclude sessions with `post_feeling IS NULL` and `is_deload=True`, which requires the missing workout-session fields and matching queue logic. [gym-coach-brain/src/gym_coach_brain/data/models.py, gym-coach-brain/src/gym_coach_brain/data/queue.py]
+- [x] [AI-Review][HIGH] Complete the remaining Story 5.1 schema contract by adding the required pre/post check-in fields to sessions and debug/anomaly fields to `RPEPrediction`, then create the corresponding Alembic migration(s). [gym-coach-brain/src/gym_coach_brain/data/models.py, gym-coach-brain/alembic/versions/]
+- [x] [AI-Review][MEDIUM] Route production job creation through `data.queue` instead of constructing `MLJob` directly in `handle_workout_start`, so queue invariants are enforced in the real runtime path. [gym-coach-brain/src/gym_coach_brain/api/handlers.py]
+- [x] [AI-Review][MEDIUM] Expand `tests/test_data/test_queue.py` to cover idempotent `enqueue_predict`, fine-tune filtering, and a guard proving the queue layer stays isolated from `gym_coach_brain.ml.*`. [gym-coach-brain/tests/test_data/test_queue.py]
+- [x] [AI-Review][LOW] Replace deprecated `datetime.utcnow()` usage in `data.queue` with timezone-aware UTC timestamps to remove Python 3.14 deprecation warnings from the queue test suite. [gym-coach-brain/src/gym_coach_brain/data/queue.py]
 
 ## Dev Notes
 
@@ -298,6 +307,60 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- Fixed `.cast(int)` → `.cast(Integer)` in `get_pending_jobs` ORDER BY clause (Python `int` is not a SQLAlchemy type; must use `sqlalchemy.Integer`)
+
 ### Completion Notes List
 
+- Task 1: Added `Index` to sqlalchemy imports in `data/models.py` and added `Index('ix_mljob_status_type', 'status', 'job_type')` to `MLJob.__table_args__`. Generated Alembic migration `0af8c7c695d8_add_ix_mljob_status_type.py` (trimmed extra user_profiles columns not part of this story).
+- Task 2: Implemented `data/queue.py` with 4 functions — `enqueue_predict`, `enqueue_fine_tune`, `get_pending_jobs` (PREDICT-first ordering via boolean cast), `update_job_status`. Zero imports from `gym_coach_brain.ml.*`. All sessions use `get_session()` context manager.
+- Task 3: Implemented `tests/test_data/test_queue.py` with 7 tests covering all CRUD operations and status transitions. All 7 pass. Full regression suite: 343 passed, 0 failures.
+- ✅ Resolved review finding [HIGH]: Added `session_id` scalar column + `UniqueConstraint('session_id', 'job_type', name='uq_mljob_session_job_type')` to `MLJob`. `enqueue_predict` now checks for existing PREDICT job by session_id before inserting (idempotent). Optional `db_session` parameter added for use within existing transactions.
+- ✅ Resolved review finding [HIGH]: Added `sleep_hours`, `pre_readiness`, `post_feeling`, `is_deload` fields to `WorkoutSession`. `enqueue_fine_tune` now filters: only sessions with `post_feeling IS NOT NULL` and `is_deload=False` are eligible; raises `ValueError` if all filtered out.
+- ✅ Resolved review finding [HIGH]: Added `core_weight_kg`, `ml_weight_kg`, `ml_adjustment_kg`, `anomaly_flag`, `source_label` fields to `RPEPrediction`. Also captured `user_profiles` missing columns (`age`, `goal`, `experience_level`, `sleep_quality_score`, `stress_score`) in same migration `b68ff5fd46f9`. SQLite batch mode used for UniqueConstraint; server_default=0 for NOT NULL booleans.
+- ✅ Resolved review finding [MEDIUM]: Removed direct `MLJob(...)` construction from `handle_workout_start`. Now calls `enqueue_predict(workout_session.id, db_session=session)` — queue invariants enforced on production path.
+- ✅ Resolved review finding [MEDIUM]: `tests/test_data/test_queue.py` expanded from 7 to 14 tests: idempotency (3 tests), fine-tune filtering (3 tests), ML isolation guard (1 test via AST import analysis).
+- ✅ Resolved review finding [LOW]: Replaced all `datetime.utcnow()` calls with `datetime.now(timezone.utc)` via `_utcnow_iso()` helper. No more Python 3.14 deprecation warnings.
+- Final: 350 passed, 0 failures.
+
 ### File List
+
+- `gym-coach-brain/src/gym_coach_brain/data/models.py` (modified — added `Index` import + index, `session_id`+`UniqueConstraint` to `MLJob`, pre/post check-in fields to `WorkoutSession`, debug/anomaly fields to `RPEPrediction`)
+- `gym-coach-brain/src/gym_coach_brain/data/queue.py` (modified — idempotent `enqueue_predict` with `db_session` param, eligibility filtering in `enqueue_fine_tune`, `_utcnow_iso()` helper replacing `datetime.utcnow()`)
+- `gym-coach-brain/src/gym_coach_brain/api/handlers.py` (modified — `handle_workout_start` now calls `enqueue_predict(..., db_session=session)` instead of direct `MLJob(...)`)
+- `gym-coach-brain/tests/test_data/test_queue.py` (modified — expanded from 7 to 14 tests)
+- `gym-coach-brain/alembic/versions/0af8c7c695d8_add_ix_mljob_status_type.py` (new — previous story)
+- `gym-coach-brain/alembic/versions/b68ff5fd46f9_epic5_schema_contract_checkin_fields_.py` (new — this story review fixes)
+
+## Senior Developer Review (AI)
+
+### Reviewer
+
+- Reviewer: Codex
+- Date: 2026-03-09
+- Outcome: Changes Requested
+
+### Summary
+
+Story 5.1 is moved back to `in-progress`. The narrow CRUD/index implementation is present, but the current Epic 5 contract is not fully implemented, so the story is not review-complete.
+
+### Findings
+
+1. `enqueue_predict` is not idempotent under the current Epic 5 contract. `MLJob` has no `session_id` column or unique `(session_id, job_type)` constraint, and repeated calls create duplicate pending jobs instead of reusing the existing PREDICT job.
+2. `enqueue_fine_tune` does not enforce the required session eligibility rules because the data model still lacks `post_feeling` and `is_deload`, and the queue helper serializes all provided IDs without filtering.
+3. The Story 5.1 schema contract is incomplete: `WorkoutSession` is missing pre/post workout check-in fields, and `RPEPrediction` is missing the debug/anomaly fields now required by Epic 5.
+4. The runtime workout flow bypasses `data.queue` and constructs `MLJob` directly in `api/handlers.py`, so queue invariants are not enforced on the production path.
+5. Queue tests cover basic CRUD and ordering only; they do not prove idempotency, fine-tune filtering, or the explicit no-`gym_coach_brain.ml.*` boundary required by the updated story contract.
+6. `data.queue` uses deprecated `datetime.utcnow()` calls, which leaves the claimed passing queue suite with Python 3.14 deprecation warnings.
+
+### Validation Notes
+
+- Verified `uv run pytest tests/test_data/test_queue.py` passes (7 passed), but the suite emits deprecation warnings from `datetime.utcnow()`.
+- Verified repeated `enqueue_predict(123)` calls create two rows in an in-memory database, which contradicts the current idempotency requirement.
+- Verified `handle_workout_start` still inserts `MLJob(...)` directly instead of calling `enqueue_predict(...)`.
+
+## Change Log
+
+- 2026-03-09: Implemented Story 5.1 — ML Data Layer / Job Queue. Added `ix_mljob_status_type` composite index to `MLJob`, created `data/queue.py` with full CRUD API, added 7 tests in `tests/test_data/test_queue.py`. All 343 tests pass.
+- 2026-03-09: Senior Developer Review (AI) requested changes. Added formal follow-up action items, moved story status back to `in-progress`, and identified remaining contract gaps around idempotency, queue integration, and Epic 5 schema requirements.
+- 2026-03-09: Addressed all 6 code review findings. Added idempotent enqueue_predict (session_id column + UniqueConstraint), fine-tune eligibility filtering, full Epic 5 schema contract (WorkoutSession check-in fields, RPEPrediction debug fields), routed handlers.py through data.queue, expanded test suite from 7 to 14 tests, fixed datetime.utcnow() deprecations. Alembic migration b68ff5fd46f9 generated and applied. 350 tests pass, 0 failures. Status moved to review.
+- 2026-03-09: Final review fixes validated. Story status moved from `review` to `done` and sprint tracking synced.

@@ -1,6 +1,6 @@
 # Story 4.1: APRE и Double Progression алгоритмы
 
-Status: review
+Status: done
 
 ## Story
 

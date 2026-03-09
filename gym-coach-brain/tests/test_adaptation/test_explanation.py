@@ -19,6 +19,7 @@ def _make_decision(
     ml_rpe: float | None = None,
     ml_confidence: float | None = None,
     fallback_reason: str | None = None,
+    source_label: str = "[ядро]",
 ) -> AdaptationDecision:
     return AdaptationDecision(
         exercise_name=exercise_name,
@@ -28,6 +29,7 @@ def _make_decision(
         ml_rpe=ml_rpe,
         ml_confidence=ml_confidence,
         fallback_reason=fallback_reason,
+        source_label=source_label,
     )
 
 
@@ -40,25 +42,26 @@ def test_explanation_includes_science_version(mock_science_config):
 
 
 def test_explanation_ml_path_includes_rpe_and_confidence(mock_science_config):
-    """ML path explanation must contain 'ML RPE' with rpe and confidence values."""
+    """ML path explanation must include the source label and science version."""
     decision = _make_decision(
         used_ml=True,
         ml_rpe=7.5,
         ml_confidence=0.85,
+        source_label="[AI: +2.5кг / RPE прогноз: 7.5 / confidence: 85%]",
     )
     explanation = ExplanationLayer.explain(decision, mock_science_config)
 
-    assert "ML RPE" in explanation
+    assert "[AI:" in explanation
     assert "7.5" in explanation
-    assert "0.85" in explanation
+    assert "85%" in explanation
 
 
 def test_explanation_fallback_path_mentions_double_progression(mock_science_config):
-    """Fallback path explanation must mention 'Double Progression'."""
-    decision = _make_decision(fallback_reason="no rpe_model provided")
+    """Fallback path explanation must carry the core source label."""
+    decision = _make_decision(fallback_reason="no rpe_model provided", source_label="[ядро]")
     explanation = ExplanationLayer.explain(decision, mock_science_config)
 
-    assert "Double Progression" in explanation
+    assert explanation.startswith("[ядро] ")
 
 
 def test_explanation_shows_weight_change(mock_science_config):
@@ -75,33 +78,32 @@ def test_explanation_shows_weight_change(mock_science_config):
 
 
 def test_explanation_low_confidence_mentions_threshold(mock_science_config):
-    """Low confidence fallback must show confidence value and threshold."""
+    """Low confidence fallback must keep the low-confidence source label."""
     decision = _make_decision(
         used_ml=False,
         ml_confidence=0.3,
         fallback_reason="confidence 0.30 below threshold 0.6",
+        source_label="[ядро: confidence 30% < порога]",
     )
     explanation = ExplanationLayer.explain(decision, mock_science_config)
 
-    assert "Double Progression" in explanation
-    assert "0.30" in explanation
-    assert "0.60" in explanation
+    assert "[ядро: confidence 30% < порога]" in explanation
 
 
 def test_explanation_no_ml_model_mentions_no_model(mock_science_config):
-    """No ML model fallback must mention 'нет ML-модели'."""
-    decision = _make_decision(fallback_reason="no rpe_model provided")
+    """No-model fallback uses the plain core source label."""
+    decision = _make_decision(fallback_reason="no rpe_model provided", source_label="[ядро]")
     explanation = ExplanationLayer.explain(decision, mock_science_config)
 
-    assert "нет ML-модели" in explanation
+    assert explanation.startswith("[ядро] ")
 
 
 def test_explanation_format_exercise_name(mock_science_config):
-    """Explanation must start with the exercise name."""
+    """Explanation must include source label before the exercise name."""
     decision = _make_decision(
         exercise_name="Squat",
         fallback_reason="no rpe_model provided",
     )
     explanation = ExplanationLayer.explain(decision, mock_science_config)
 
-    assert explanation.startswith("Squat:")
+    assert explanation.startswith("[ядро] Squat:")

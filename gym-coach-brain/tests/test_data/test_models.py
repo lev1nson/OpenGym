@@ -322,6 +322,14 @@ def test_ml_job_processed_at_nullable(db_session):
     assert job.processed_at is None
 
 
+def test_ml_job_session_id_has_fk():
+    """MLJob.session_id must reference workout_sessions.id."""
+    col = MLJob.__table__.c.session_id
+    fks = list(col.foreign_keys)
+    assert len(fks) == 1, "session_id must have exactly one ForeignKey"
+    assert fks[0].column.table.name == "workout_sessions"
+
+
 # ─── All 10 Tables Present ────────────────────────────────────────────────────
 
 def test_all_10_tables_exist(engine):

@@ -1,6 +1,6 @@
 # Story 4.3: Readiness log и lifestyle коэффициенты
 
-Status: in-progress
+Status: done
 
 ## Story
 
@@ -60,11 +60,11 @@ so that the system adjusts my training load based on my recovery state.
 - [x] [AI-Review][MEDIUM] Add integration tests for `handle_readiness_log` to verify DB storage and intent parsing [gym-coach-brain/tests/test_api/test_readiness_handler.py]
 - [x] [AI-Review][MEDIUM] Track story files in git to resolve `??` status in porcelain output [git add]
 - [x] [AI-Review][LOW] Add upper bound validation for HRV (0–100 range) in handler [gym-coach-brain/src/gym_coach_brain/api/handlers.py:339]
-- [ ] [AI-Review][HIGH] Stale Data: `handle_readiness_log` creates new rows instead of updating existing entries for the same date [gym-coach-brain/src/gym_coach_brain/api/handlers.py:348]
-- [ ] [AI-Review][HIGH] Date Lookup Fragility: `get_recovery_signal_or_default` equality check fails if session_date includes timestamp [gym-coach-brain/src/gym_coach_brain/core/readiness.py:143]
-- [ ] [AI-Review][MEDIUM] Untracked Files: Add implementation and test files to git repository [project-root]
-- [ ] [AI-Review][MEDIUM] Poor Typing: Replace `db_session: object` with `Session` in `get_recovery_signal_or_default` [gym-coach-brain/src/gym_coach_brain/core/readiness.py:127]
-- [ ] [AI-Review][LOW] Component Range: Ensure sleep_component and stress_component are clamped to [0.0, 1.0] [gym-coach-brain/src/gym_coach_brain/core/readiness.py:75]
+- [x] [AI-Review][HIGH] Stale Data: `handle_readiness_log` creates new rows instead of updating existing entries for the same date [gym-coach-brain/src/gym_coach_brain/api/handlers.py:348]
+- [x] [AI-Review][HIGH] Date Lookup Fragility: `get_recovery_signal_or_default` equality check fails if session_date includes timestamp [gym-coach-brain/src/gym_coach_brain/core/readiness.py:143]
+- [x] [AI-Review][MEDIUM] Untracked Files: Add implementation and test files to git repository [project-root]
+- [x] [AI-Review][MEDIUM] Poor Typing: Replace `db_session: object` with `Session` in `get_recovery_signal_or_default` [gym-coach-brain/src/gym_coach_brain/core/readiness.py:127]
+- [x] [AI-Review][LOW] Component Range: Ensure sleep_component and stress_component are clamped to [0.0, 1.0] [gym-coach-brain/src/gym_coach_brain/core/readiness.py:75]
 
 ## Dev Notes
 
@@ -660,6 +660,13 @@ claude-sonnet-4-6
 - ✅ Resolved review finding [MEDIUM]: Story files tracked via git (process item).
 - ✅ Resolved review finding [LOW]: Added HRV upper bound validation (0–100 range) in `handle_readiness_log`.
 - Full regression after review fixes: 232 passed, 0 failures.
+- ✅ Resolved review finding [HIGH]: Stale Data — implemented upsert in `handle_readiness_log`: existing row for same date is updated, not duplicated.
+- ✅ Resolved review finding [HIGH]: Date Lookup Fragility — `get_recovery_signal_or_default` normalizes `session_date[:10]` before query; accepts full ISO timestamps.
+- ✅ Resolved review finding [MEDIUM]: Untracked Files — all implementation and test files staged in git.
+- ✅ Resolved review finding [MEDIUM]: Poor Typing — `db_session: object` replaced with `db_session: "Session"` via TYPE_CHECKING import.
+- ✅ Resolved review finding [LOW]: Component Range — `sleep_component` and `stress_component` now clamped to `[0.0, 1.0]` via `max(0.0, min(1.0, ...))`.
+- Added 2 new integration tests: `test_readiness_log_upsert_same_day`, `test_get_recovery_signal_normalizes_timestamp_input`.
+- Full regression: 327 passed, 0 failures.
 
 ### File List
 
@@ -672,3 +679,5 @@ claude-sonnet-4-6
 
 - Initial implementation: `core/readiness.py`, `handle_readiness_log` in `api/handlers.py`, `tests/test_core/test_readiness.py` — 16 unit tests, 216 passed (Date: 2026-03-04)
 - Addressed code review findings — 5 items resolved: date precision fix (HIGH), utcnow deprecation (MEDIUM), integration tests (MEDIUM), git tracking (MEDIUM), HRV upper bound (LOW). Added `tests/test_api/test_readiness_handler.py` with 16 integration tests. Full regression: 232 passed. (Date: 2026-03-08)
+- Addressed second round review findings — 5 items resolved: upsert stale data (HIGH), date lookup normalization (HIGH), git tracking (MEDIUM), db_session typing (MEDIUM), component range clamping (LOW). Added 2 tests (upsert + timestamp normalization). Full regression: 327 passed. (Date: 2026-03-09)
+- Senior Developer Review (AI) — Fixed ZeroDivisionError when redistributing HRV weight with zero config weights (MEDIUM). Fixed Git Staging claim by staging tracked files (MEDIUM). Story approved. (Date: 2026-03-09)

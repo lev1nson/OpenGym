@@ -29,7 +29,8 @@ class RPEModelProtocol(Protocol):
         Args:
             features: Dict with keys matching ML feature spec:
                 exercise_id, set_number, weight, reps, historical_rpe,
-                readiness_score, days_since_last_session,
+                readiness_score, days_since_last_session, sleep_hours,
+                pre_readiness, workout_hour_sin, workout_hour_cos,
                 muscle_group_fatigue_estimate
 
         Returns:

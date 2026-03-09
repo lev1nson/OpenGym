@@ -47,13 +47,24 @@ methodologies:
 planning:
   min_rest_days_per_muscle_group: 2  # int — min rest days (isolation; Monteiro 2018, PMC6015912; 48h = 2 days)
   min_rest_days_compound: 3          # int — min rest days (multi-joint; De Salles 2010, PMC6719818; 72h = 3 days)
+  detraining_threshold_days: 14      # int — days of absence after which detraining penalty is applied (Mujika & Padilla 2000)
+  detraining_coefficient: 0.85       # float — weight multiplier after detraining break (0.85 = 15% reduction; conservative return protocol)
+  deload_trigger_sessions: 16        # int — completed sessions before recommending a deload week (Israetel: 3-4 week mesocycles)
 
 ml:
   confidence_threshold: 0.6   # float — MC Dropout confidence below which fallback to Double Progression (architecture ADR-001)
   rpe_easy_threshold: 7.0     # float — RPE below this → athlete has spare capacity, increment weight
   rpe_hard_threshold: 8.5     # float — RPE above this → near failure, hold or reduce weight
+  fatigue_lookback_sessions: 3  # int — recent same-muscle completed sessions used for ML fatigue feature
+  max_correction_percent: 0.15  # float — max ML delta as fraction of core weight (±15%)
+  anomaly_rollback_threshold: 5  # int — consecutive anomalies before model rollback
+  rpe_weight_sensitivity: 0.025  # float — weight change per RPE unit (~2.5% per RPE unit)
 
 plateau_detection_sessions: 3  # int — number of consecutive sessions without progress to trigger plateau warning
+
+summary:
+  rpe_easy_threshold: 7.0    # float — avg RPE below which session is "easy" (3 RIR = comfortable)
+  rpe_fatigue_threshold: 8.0 # float — avg RPE above which athlete shows fatigue (2 RIR = hard)
 
 initial_weight_table:
   # Starting weight coefficients by experience level and movement pattern.

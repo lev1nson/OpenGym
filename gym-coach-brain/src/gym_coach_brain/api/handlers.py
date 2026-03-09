@@ -11,6 +11,7 @@ Handler contract:
 """
 import argparse
 import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -31,7 +32,9 @@ from gym_coach_brain.data.models import (
     MovementPattern,
     ReadinessLog,
     UserProfile,
+    WorkoutSession,
 )
+from gym_coach_brain.data.queue import enqueue_predict
 
 if TYPE_CHECKING:
     from gym_coach_brain.core.science import ScienceConfig
@@ -449,3 +452,79 @@ def handle_profile_update_split(argv: list[str], session: Session) -> tuple[str,
         f"Следующая тренировка начнётся с: {split_to_day.get(args.split, 'full_body')}",
         0,
     )
+
+
+def handle_workout_start(
+    argv: list[str], session: Session, science: "ScienceConfig"
+) -> tuple[str, int]:
+    """Generate and persist today's workout plan for the current athlete."""
+    from gym_coach_brain.core.planner import WorkoutPlanner
+
+    parser = argparse.ArgumentParser(prog="workout_start", add_help=False)
+    parser.add_argument("--sleep-hours", type=float, required=True)
+    parser.add_argument("--pre-readiness", type=int, required=True)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return (
+            "workout_start: required --sleep-hours <5.0|6.5|7.5|9.0> "
+            "--pre-readiness <2|5|9>",
+            1,
+        )
+
+    if args.sleep_hours not in {5.0, 6.5, 7.5, 9.0}:
+        return "workout_start: --sleep-hours must be one of 5.0, 6.5, 7.5, 9.0", 1
+    if args.pre_readiness not in {2, 5, 9}:
+        return "workout_start: --pre-readiness must be one of 2, 5, 9", 1
+
+    profile = _get_or_none(session)
+    if profile is None:
+        return "Профиль не найден. Сначала запустите onboarding_start.", 1
+    if not profile.onboarding_complete:
+        return "Онбординг не завершён. Сначала запустите onboarding_complete.", 1
+
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    readiness_log = session.query(ReadinessLog).filter_by(session_date=today).first()
+    recovery_signal = (
+        calculate_recovery_signal(readiness_log, science)
+        if readiness_log is not None
+        else None
+    )
+
+    plan = WorkoutPlanner().generate(profile, science, session, recovery_signal)
+    planned_exercises = [asdict(exercise) for exercise in plan.exercises]
+
+    workout_session = WorkoutSession(
+        session_date=today,
+        status="active",
+        methodology=getattr(profile, "goal", None) or "hypertrophy",
+        planned_exercises=json.dumps(planned_exercises),
+        split_day_label=plan.split_day_label,
+        sleep_hours=args.sleep_hours,
+        pre_readiness=args.pre_readiness,
+    )
+    session.add(workout_session)
+    session.flush()  # assigns workout_session.id
+
+    # Route through data.queue so invariants (idempotency, session_ids format) are enforced
+    enqueue_predict(workout_session.id, db_session=session)
+    session.flush()
+
+    lines = [
+        f"Сегодня — {', '.join(plan.muscle_groups_today)}",
+        "",
+    ]
+    for index, exercise in enumerate(plan.exercises, start=1):
+        lines.append(
+            f"{index}. {exercise.exercise_name} (id:{exercise.exercise_id}): "
+            f"{exercise.sets}x{exercise.rep_range[0]}-{exercise.rep_range[1]} "
+            f"@ {exercise.target_weight_kg:.1f}кг"
+        )
+
+    if plan.skipped_groups:
+        lines.extend(["", f"Пропущенные группы: {', '.join(plan.skipped_groups)}"])
+    if plan.warnings:
+        lines.extend(["", *plan.warnings])
+
+    return "\n".join(lines), 0

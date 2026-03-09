@@ -21,6 +21,7 @@ from gym_coach_brain.core.science import (
     MethodologiesConfig,
     PlanningConfig,
     MLConfig,
+    SummaryConfig,
 )
 
 
@@ -102,7 +103,19 @@ def mock_science_config() -> ScienceConfig:
         planning=PlanningConfig(
             min_rest_days_per_muscle_group=2,
             min_rest_days_compound=3,
+            detraining_threshold_days=14,
+            detraining_coefficient=0.85,
+            deload_trigger_sessions=16,
         ),
-        ml=MLConfig(confidence_threshold=0.6),
+        ml=MLConfig(
+            confidence_threshold=0.6,
+            rpe_easy_threshold=7.0,
+            rpe_hard_threshold=8.5,
+            fatigue_lookback_sessions=3,
+            max_correction_percent=0.15,
+            anomaly_rollback_threshold=5,
+            rpe_weight_sensitivity=0.025,
+        ),
         plateau_detection_sessions=3,
+        summary=SummaryConfig(rpe_easy_threshold=7.0, rpe_fatigue_threshold=8.0),
     )

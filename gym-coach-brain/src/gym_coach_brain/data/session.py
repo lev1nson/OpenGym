@@ -7,7 +7,7 @@ Environment variables:
 """
 import os
 
-from sqlalchemy import create_engine as _create_engine
+from sqlalchemy import create_engine as _create_engine, event
 from sqlalchemy.orm import Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///gym_coach.sqlite")
@@ -16,7 +16,16 @@ MODEL_DIR = os.getenv("MODEL_DIR", "./models/")
 
 def get_engine(url: str = DATABASE_URL):
     """Create SQLAlchemy engine. Use url param to override DATABASE_URL."""
-    return _create_engine(url)
+    engine = _create_engine(url)
+
+    if engine.dialect.name == "sqlite":
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+    return engine
 
 
 # Module-level default engine — created once per process

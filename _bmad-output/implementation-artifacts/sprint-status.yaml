@@ -84,7 +84,7 @@ development_status:
   epic-5: in-progress
   5-1-ml-data-layer: done
   5-2-rpe-model-pytorch: done
-  5-3-ml-worker-daemon: backlog
+  5-3-ml-worker-daemon: ready-for-dev
   5-4-model-versioning: backlog
   5-5-simulation-e2e: backlog
   epic-5-retrospective: optional

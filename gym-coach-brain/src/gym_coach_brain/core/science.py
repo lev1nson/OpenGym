@@ -85,11 +85,20 @@ class PlanningConfig(BaseModel):
     min_rest_days_per_muscle_group: isolation exercises (48h = 2 days;
         PMC6015912, Monteiro 2018; PMC6719818, De Salles 2010).
     min_rest_days_compound: multi-joint movements (72h = 3 days).
+    detraining_threshold_days: days of absence after which detraining coefficient is applied.
+        Evidence: Mujika & Padilla (2000). 2 weeks = measurable strength loss onset.
+    detraining_coefficient: weight multiplier after long break (e.g. 0.85 = 15% reduction).
+        Evidence: conservative return protocol to prevent injury on reactivation.
+    deload_trigger_sessions: completed sessions in a mesocycle before recommending deload.
+        Evidence: Israetel — 3-4 week mesocycles (12-16 sessions at 3-4/week).
     All fields ≥0 to allow placeholder 0 values in skeleton.
     """
 
     min_rest_days_per_muscle_group: int = Field(ge=0)
     min_rest_days_compound: int = Field(ge=0)
+    detraining_threshold_days: int = Field(default=14, ge=1)
+    detraining_coefficient: float = Field(default=0.85, ge=0.0, le=1.0)
+    deload_trigger_sessions: int = Field(default=16, ge=1)
 
 
 class MLConfig(BaseModel):
@@ -102,11 +111,38 @@ class MLConfig(BaseModel):
         → increment weight (Double Progression step). Default: 7.0.
     rpe_hard_threshold: RPE above this value means athlete is near failure
         → hold or reduce weight. Default: 8.5.
+    fatigue_lookback_sessions: Number of recent same-muscle completed sessions
+        used to estimate fatigue for ML feature generation.
+    max_correction_percent: Maximum relative delta between deterministic core
+        weight and ML-adjusted weight before the correction is blocked.
+    anomaly_rollback_threshold: Number of consecutive anomalies that should
+        trigger model rollback logic in later stories.
+    rpe_weight_sensitivity: Fractional weight adjustment applied per RPE point
+        between predicted and target RPE.
     """
 
     confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     rpe_easy_threshold: float = Field(default=7.0, ge=1.0, le=10.0)
     rpe_hard_threshold: float = Field(default=8.5, ge=1.0, le=10.0)
+    fatigue_lookback_sessions: int = Field(default=3, ge=1)
+    max_correction_percent: float = Field(default=0.15, ge=0.0, le=1.0)
+    anomaly_rollback_threshold: int = Field(default=5, ge=1)
+    rpe_weight_sensitivity: float = Field(default=0.025, ge=0.0)
+
+
+class SummaryConfig(BaseModel):
+    """RPE thresholds for post-workout fatigue assessment.
+
+    rpe_easy_threshold: avg RPE below this → session classified as "easy"
+    rpe_fatigue_threshold: avg RPE at or above this → "fatigued" classification
+
+    Based on: Borg RPE scale application to resistance training feedback.
+    RPE 7 = 3 RIR (3 reps in reserve) — comfortable working zone.
+    RPE 8 = 2 RIR — approaching challenging territory.
+    """
+
+    rpe_easy_threshold: float = Field(default=7.0, ge=0.0, le=10.0)
+    rpe_fatigue_threshold: float = Field(default=8.0, ge=0.0, le=10.0)
 
 
 class ExerciseConfig(BaseModel):
@@ -151,6 +187,7 @@ class ScienceConfig(BaseModel):
     equipment_increments: EquipmentIncrementsConfig = Field(default_factory=EquipmentIncrementsConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     plateau_detection_sessions: int = Field(default=3, ge=1)
+    summary: SummaryConfig = Field(default_factory=SummaryConfig)
     initial_weight_table: dict[str, dict[str, float]] = {}
 
 

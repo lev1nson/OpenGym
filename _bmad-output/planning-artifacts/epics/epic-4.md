@@ -99,7 +99,7 @@ So that I understand why specific weights and reps are assigned to me.
 **And** каждое изменение веса сопровождается обоснованием
 **And** `AdaptationEngine` принимает `rpe_model` как параметр (duck typing / `RPEModelProtocol` из `ml/interface.py`) — не импортирует `RPEModel` напрямую, обеспечивая изоляцию от PyTorch в Epic 4
 **And** `ml/interface.py` создаётся в этой истории: `class RPEModelProtocol(Protocol): def predict(self, features) -> tuple[float, float]: ...`
-**And** рекомендация следующего сета вызывает `core.weight_utils.round_to_equipment_increment(weight, equipment_type)` перед возвратом — итоговый вес всегда кратен шагу оборудования (барбелл: 2.5кг, гантели: 1кг, тренажёр: без округления)
+**And** рекомендация следующего сета вызывает `core.weight_utils.round_to_equipment_increment(weight, equipment_type)` перед возвратом — итоговый вес всегда кратен шагу оборудования (барбелл: 2.5кг, гантели: 1кг, тренажёр: 5.0кг)
 **And** `AdaptationEngine` детектирует плато: если для `exercise_id` за последние `ScienceConfig.plateau_detection_sessions` сессий нет роста ни по весу ни по объёму (reps × sets) — в stdout рекомендации добавляется «📊 Плато [N] сессий — попробуй другое упражнение или измени диапазон повторений»; решение остаётся за атлетом/агентом
 **And** `pytest tests/test_adaptation/test_engine.py` и `test_explanation.py` проходят с `mock_science_config` и `mock_rpe_model`:
 - weight округляется корректно для barbell/dumbbell

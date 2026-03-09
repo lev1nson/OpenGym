@@ -1,6 +1,6 @@
 # Story 4.6: Recap и Summary генераторы
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -45,75 +45,82 @@ so that I stay informed about my progress and recovery without manual analysis.
 
 ## Tasks / Subtasks
 
-- [ ] **Расширить `ScienceEvidence.md`** (AC: summary thresholds)
-  - [ ] Добавить после секции `ml:` секцию `summary:` с двумя порогами:
+- [x] **Расширить `ScienceEvidence.md`** (AC: summary thresholds)
+  - [x] Добавить после секции `ml:` секцию `summary:` с двумя порогами:
     ```yaml
     summary:
       rpe_easy_threshold: 7.0      # float — avg RPE below which session is "easy"
       rpe_fatigue_threshold: 8.0   # float — avg RPE above which session shows fatigue
     ```
-  - [ ] Проверить: `uv run python -c "from gym_coach_brain.core.science import load_science_config; c = load_science_config(); print(c.summary.rpe_easy_threshold)"`
+  - [x] Проверить: `uv run python -c "from gym_coach_brain.core.science import load_science_config; c = load_science_config(); print(c.summary.rpe_easy_threshold)"`
 
-- [ ] **Расширить `core/science.py`** (AC: SummaryConfig)
-  - [ ] Добавить после `MLConfig`:
+- [x] **Расширить `core/science.py`** (AC: SummaryConfig)
+  - [x] Добавить после `MLConfig`:
     ```python
     class SummaryConfig(BaseModel):
         rpe_easy_threshold: float = Field(default=7.0, ge=0.0, le=10.0)
         rpe_fatigue_threshold: float = Field(default=8.0, ge=0.0, le=10.0)
     ```
-  - [ ] Добавить поле `summary: SummaryConfig = Field(default_factory=SummaryConfig)` в `ScienceConfig`
-  - [ ] Проверить: существующие тесты `test_core/test_science.py` PASS (backward-compat default_factory)
+  - [x] Добавить поле `summary: SummaryConfig = Field(default_factory=SummaryConfig)` в `ScienceConfig`
+  - [x] Проверить: существующие тесты `test_core/test_science.py` PASS (backward-compat default_factory)
 
-- [ ] **Обновить `tests/conftest.py`** (AC: mock_science_config с summary)
-  - [ ] Добавить `SummaryConfig` в импорт из `gym_coach_brain.core.science`
-  - [ ] Добавить `summary=SummaryConfig(rpe_easy_threshold=7.0, rpe_fatigue_threshold=8.0)` в `mock_science_config`
+- [x] **Обновить `tests/conftest.py`** (AC: mock_science_config с summary)
+  - [x] Добавить `SummaryConfig` в импорт из `gym_coach_brain.core.science`
+  - [x] Добавить `summary=SummaryConfig(rpe_easy_threshold=7.0, rpe_fatigue_threshold=8.0)` в `mock_science_config`
 
-- [ ] **Создать `adaptation/recap.py`** (AC: generate_recap функция)
-  - [ ] Реализовать `generate_recap(db_session, user_profile_id) -> str`:
-    - [ ] Найти последнюю `WorkoutSession` со `status="completed"` для данного `user_profile_id` или глобально (если нет user_id FK)
-    - [ ] Если не найдена → вернуть `"Первая тренировка — история пока пуста"`
-    - [ ] Для каждого уникального `exercise_id` в `WorkoutSet` → сгруппировать подходы по упражнению
-    - [ ] Для каждого упражнения: `"{exercise_name}: {w1}кг × {r1}, {w2}кг × {r2}, ..."` (по `set_number`)
-    - [ ] Для bodyweight (weight_kg=0.0): формат `"Подтягивания: × 12, × 10, × 11"` (без веса)
-    - [ ] Вернуть все строки через `\n`
+- [x] **Создать `adaptation/recap.py`** (AC: generate_recap функция)
+  - [x] Реализовать `generate_recap(db_session, user_profile_id) -> str`:
+    - [x] Найти последнюю `WorkoutSession` со `status="completed"` для данного `user_profile_id` или глобально (если нет user_id FK)
+    - [x] Если не найдена → вернуть `"Первая тренировка — история пока пуста"`
+    - [x] Для каждого уникального `exercise_id` в `WorkoutSet` → сгруппировать подходы по упражнению
+    - [x] Для каждого упражнения: `"{exercise_name}: {w1}кг × {r1}, {w2}кг × {r2}, ..."` (по `set_number`)
+    - [x] Для bodyweight (weight_kg=0.0): формат `"Подтягивания: × 12, × 10, × 11"` (без веса)
+    - [x] Вернуть все строки через `\n`
 
-- [ ] **Создать `adaptation/summary.py`** (AC: generate_summary функция)
-  - [ ] Реализовать `generate_summary(session, db_session, science) -> str`:
-    - [ ] `session` — завершённая `WorkoutSession` ORM объект
-    - [ ] Собрать все `WorkoutSet` для сессии, вычислить:
+- [x] **Создать `adaptation/summary.py`** (AC: generate_summary функция)
+  - [x] Реализовать `generate_summary(session, db_session, science) -> str`:
+    - [x] `session` — завершённая `WorkoutSession` ORM объект
+    - [x] Собрать все `WorkoutSet` для сессии, вычислить:
       - `total_sets` — общее количество подходов
       - `avg_rpe` — средний RPE по всем подходам (где rpe не None)
       - `weight_trend` — сравнить первый и последний подход для каждого упражнения (снизился ли вес к концу)
-    - [ ] Оценка усталости через пороги из `science.summary`
-    - [ ] Сравнение плана и факта:
+    - [x] Оценка усталости через пороги из `science.summary`
+    - [x] Сравнение плана и факта:
       - `planned_names` = `{ex["exercise_name"] for ex in json.loads(session.planned_exercises or "[]")}`
       - `actual_names` = `{WorkoutSet.exercise.name}` по всем сетам сессии (через join с exercises)
       - Пропущенные: `planned_names - actual_names`
       - Дополнительные: `actual_names - planned_names`
-    - [ ] Собрать финальную строку и вернуть
+    - [x] Собрать финальную строку и вернуть
 
-- [ ] **Создать `tests/test_adaptation/__init__.py`** (если не создан в Story 4.5)
-  - [ ] Пустой файл — обеспечивает корректное обнаружение pytest
+- [x] **Создать `tests/test_adaptation/__init__.py`** (если не создан в Story 4.5)
+  - [x] Пустой файл — обеспечивает корректное обнаружение pytest
 
-- [ ] **Создать `tests/test_adaptation/test_recap.py`** (AC: Recap тесты)
-  - [ ] `test_recap_empty_history` — нет завершённых сессий → возвращает "Первая тренировка..."
-  - [ ] `test_recap_formats_sets_correctly` — сессия с 3 подходами → правильный формат `"Жим лёжа: 80.0кг × 8, ..."`
-  - [ ] `test_recap_bodyweight_omits_weight` — weight_kg=0.0 → формат без веса `"Подтягивания: × 12"`
-  - [ ] `test_recap_latest_completed_session` — несколько сессий → возвращает именно последнюю completed
-  - [ ] `test_recap_ignores_non_completed_sessions` — сессия со status="planned" → игнорируется
+- [x] **Создать `tests/test_adaptation/test_recap.py`** (AC: Recap тесты)
+  - [x] `test_recap_empty_history` — нет завершённых сессий → возвращает "Первая тренировка..."
+  - [x] `test_recap_formats_sets_correctly` — сессия с 3 подходами → правильный формат `"Жим лёжа: 80.0кг × 8, ..."`
+  - [x] `test_recap_bodyweight_omits_weight` — weight_kg=0.0 → формат без веса `"Подтягивания: × 12"`
+  - [x] `test_recap_latest_completed_session` — несколько сессий → возвращает именно последнюю completed
+  - [x] `test_recap_ignores_non_completed_sessions` — сессия со status="planned" → игнорируется
 
-- [ ] **Создать `tests/test_adaptation/test_summary.py`** (AC: Summary тесты)
-  - [ ] `test_summary_no_missed_no_extra` — plan = actual → нет `❌`, нет `➕`
-  - [ ] `test_summary_missed_exercise` — упражнение в плане, не выполнено → `❌ Пропущено`
-  - [ ] `test_summary_extra_exercise` — выполнено сверхплана → `➕ Дополнительно`
-  - [ ] `test_summary_easy_rpe` — avg_rpe 5.0 (< 7.0) → `"Объёмы хорошие"`
-  - [ ] `test_summary_high_rpe` — avg_rpe 9.0 (>= 8.0) → `"Видно что устал"`
-  - [ ] `test_summary_total_sets_count` — 3 упражнения × 3 подхода → `total_sets=9` в выводе
-  - [ ] `test_summary_thresholds_from_science_config` — меняем пороги в mock → оценка меняется
+- [x] **Создать `tests/test_adaptation/test_summary.py`** (AC: Summary тесты)
+  - [x] `test_summary_no_missed_no_extra` — plan = actual → нет `❌`, нет `➕`
+  - [x] `test_summary_missed_exercise` — упражнение в плане, не выполнено → `❌ Пропущено`
+  - [x] `test_summary_extra_exercise` — выполнено сверхплана → `➕ Дополнительно`
+  - [x] `test_summary_easy_rpe` — avg_rpe 5.0 (< 7.0) → `"Объёмы хорошие"`
+  - [x] `test_summary_high_rpe` — avg_rpe 9.0 (>= 8.0) → `"Видно что устал"`
+  - [x] `test_summary_total_sets_count` — 3 упражнения × 3 подхода → `total_sets=9` в выводе
+  - [x] `test_summary_thresholds_from_science_config` — меняем пороги в mock → оценка меняется
 
-- [ ] **Регрессионная проверка:**
-  - [ ] `uv run pytest tests/test_adaptation/ -v`
-  - [ ] `uv run pytest -v` — полная регрессия (ожидается: 216+ passed)
+- [x] **Регрессионная проверка:**
+  - [x] `uv run pytest tests/test_adaptation/ -v` — 12 passed
+  - [x] `uv run pytest -v` — полная регрессия: 296 passed
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][High] Honor the weight-decline fatigue rule even when RPE is missing; `generate_summary()` currently returns `"Нормальная нагрузка"` before checking `weight_declined`, which misses an explicit AC branch. [gym-coach-brain/src/gym_coach_brain/adaptation/summary.py:102]
+- [x] [AI-Review][High] Make recap selection deterministic for same-timestamp completed sessions; ordering only by `session_date` reproduced a stale recap from the older row instead of the latest completed workout. [gym-coach-brain/src/gym_coach_brain/adaptation/recap.py:44]
+- [x] [AI-Review][Medium] Guard `planned_exercises` parsing in `generate_summary()`; malformed JSON currently raises `JSONDecodeError` and aborts summary generation instead of degrading safely. [gym-coach-brain/src/gym_coach_brain/adaptation/summary.py:64]
+- [x] [AI-Review][Medium] Reconcile Story 4.6 documentation with the current worktree: the File List omits modified application files, and the story explicitly says `adaptation/engine.py` / `explanation.py` are not changed even though git shows changes there. [_bmad-output/implementation-artifacts/4-6-recap-summary.md:618]
 
 ## Dev Notes
 
@@ -694,6 +701,85 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- Reproduced the three open code findings with focused pytest cases before patching `recap.py` and `summary.py`.
+- Revalidated with focused adaptation tests, full repo regression, and a direct `load_science_config()` threshold probe after the fixes.
+
 ### Completion Notes List
 
+- Implemented `generate_recap(db_session) -> str` in `adaptation/recap.py`. Pure DB read, groups WorkoutSet by exercise_id, formats lines with weight or bodyweight style.
+- Implemented `generate_summary(session, db_session, science) -> str` in `adaptation/summary.py`. Computes total_sets, avg_rpe fatigue label (via ScienceConfig.summary thresholds), and plan/actual comparison.
+- Added `SummaryConfig(BaseModel)` to `core/science.py` with `rpe_easy_threshold` and `rpe_fatigue_threshold` fields; added `summary` field to `ScienceConfig` using `default_factory=SummaryConfig` for backward compat.
+- Extended `ScienceEvidence.md` frontmatter with `summary:` section (both thresholds).
+- Updated `tests/conftest.py`: added `SummaryConfig` to imports and `mock_science_config`.
+- Created 12 tests: 5 for recap (empty history, format, bodyweight, latest session, non-completed ignored), 7 for summary (plan/actual, RPE thresholds, total sets, configurable thresholds).
+- Added review regression tests for same-timestamp recap ordering, fatigue from weight decline without RPE, and malformed `planned_exercises` JSON fallback.
+- `generate_recap()` now breaks tied `session_date` values with `id DESC`, which makes latest completed-session selection deterministic.
+- `generate_summary()` now honors the weight-decline fatigue rule even when RPE is missing and falls back to an empty plan when `planned_exercises` contains malformed JSON.
+- Reconciled the story File List with the current `gym-coach-brain` worktree, including parallel edits already present during validation.
+- Validation after fixes: `uv run pytest tests/test_adaptation/test_recap.py tests/test_adaptation/test_summary.py -v` → 15 passed; `uv run pytest -v` → 336 passed; `uv run python -c "from gym_coach_brain.core.science import load_science_config; ..."` → `7.0 8.0`.
+
 ### File List
+
+_Current `gym-coach-brain` worktree observed during validation:_
+
+gym-coach-brain/ScienceEvidence.md
+gym-coach-brain/src/gym_coach_brain/adaptation/engine.py
+gym-coach-brain/src/gym_coach_brain/adaptation/explanation.py
+gym-coach-brain/src/gym_coach_brain/adaptation/recap.py
+gym-coach-brain/src/gym_coach_brain/adaptation/summary.py
+gym-coach-brain/src/gym_coach_brain/api/handlers.py
+gym-coach-brain/src/gym_coach_brain/core/planner.py
+gym-coach-brain/src/gym_coach_brain/core/readiness.py
+gym-coach-brain/src/gym_coach_brain/core/science.py
+gym-coach-brain/src/gym_coach_brain/data/features.py
+gym-coach-brain/tests/conftest.py
+gym-coach-brain/tests/test_adaptation/test_engine.py
+gym-coach-brain/tests/test_adaptation/test_explanation.py
+gym-coach-brain/tests/test_adaptation/test_recap.py
+gym-coach-brain/tests/test_adaptation/test_summary.py
+gym-coach-brain/tests/test_api/test_handlers.py
+gym-coach-brain/tests/test_api/test_readiness_handler.py
+gym-coach-brain/tests/test_core/test_planner.py
+
+### Senior Developer Review (AI)
+
+**Reviewer:** Max  
+**Date:** 2026-03-09  
+**Outcome:** Changes Requested
+
+**Scope loaded**
+- Story 4.6 implementation artifact, Epic 4 requirements, architecture, and project-context
+- No UX design artifact was present for this story
+- Tech stack confirmed from project context: Python 3.14, SQLAlchemy 2.x, Pydantic 2.x, SQLite, pytest
+
+**Validation performed**
+- `uv run pytest tests/test_adaptation/test_recap.py tests/test_adaptation/test_summary.py -q` → 12 passed
+- `uv run pytest -q` → 298 passed
+- `uv run python -c "from gym_coach_brain.core.science import load_science_config; ..."` → summary thresholds load as `7.0 / 8.0`
+- Targeted runtime probes reproduced two defects:
+  - weight drop with no RPE still reports `"Нормальная нагрузка"`
+  - two completed sessions with identical `session_date` return the older recap
+
+**Findings**
+1. **High:** `generate_summary()` short-circuits to `"Нормальная нагрузка"` when `avg_rpe is None`, so the required `weight_declined` fatigue path is never evaluated unless RPE was logged. This misses the AC branch `fatigue_threshold OR weights declined`. [gym-coach-brain/src/gym_coach_brain/adaptation/summary.py:102]
+2. **High:** `generate_recap()` orders completed sessions only by `session_date DESC`. With two completed rows sharing the same timestamp, SQLite returned the older row in a reproduction, so the recap is not reliably the latest workout. [gym-coach-brain/src/gym_coach_brain/adaptation/recap.py:44]
+3. **Medium:** `generate_summary()` trusts `session.planned_exercises` blindly. A malformed JSON payload raises `JSONDecodeError` and aborts summary generation instead of falling back to an empty plan or a controlled error path. [gym-coach-brain/src/gym_coach_brain/adaptation/summary.py:64]
+4. **Medium:** The story documentation no longer matches the worktree. The story says `adaptation/engine.py` and `explanation.py` are not modified and omits several changed application files from the File List, but git currently shows changes in `adaptation/engine.py`, `adaptation/explanation.py`, `data/features.py`, `tests/test_adaptation/test_engine.py`, and `tests/test_adaptation/test_explanation.py`. [_bmad-output/implementation-artifacts/4-6-recap-summary.md:618]
+
+**Git vs Story discrepancies**
+- Files changed in git but absent from the story File List: `gym-coach-brain/src/gym_coach_brain/adaptation/engine.py`, `gym-coach-brain/src/gym_coach_brain/adaptation/explanation.py`, `gym-coach-brain/src/gym_coach_brain/data/features.py`, `gym-coach-brain/tests/test_adaptation/test_engine.py`, `gym-coach-brain/tests/test_adaptation/test_explanation.py`
+- Story File List entries for the 4.6 files do correspond to current changes
+- No staged changes were present during review
+
+**References**
+- Python `json` library docs: `json.loads()` raises `JSONDecodeError` on invalid documents
+- SQLite SELECT semantics: ordering among ties needs an explicit tie-breaker to be deterministic
+
+## Change Log
+
+| Date | Change |
+|------|--------|
+| 2026-03-09 | Story 4.6 implemented: added SummaryConfig to science.py, ScienceEvidence.md; created adaptation/recap.py (generate_recap) and adaptation/summary.py (generate_summary); added 12 tests covering all ACs; 296 tests pass. |
+| 2026-03-09 | Senior Developer Review (AI): Changes requested. Added 4 follow-up items, moved status to `in-progress`, and synced sprint tracking. |
+| 2026-03-09 | Addressed code review findings: fixed same-timestamp recap ordering, honored fatigue from weight decline without RPE, hardened malformed `planned_exercises` parsing, synced the File List with the current worktree, and revalidated with 15 focused tests plus 336 full-suite passes. |
+| 2026-03-09 | Adversarial Code Review: Fixed N+1 queries in recap and summary, improved drop set fatigue heuristic, added strict list check for planned_exercises, formatting fixes, tracked files in git. Status moved to done. |

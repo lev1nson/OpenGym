@@ -6,13 +6,13 @@
 
 ## Overview
 
-This document defines the complete 14-dimensional feature vector used as input for the RPEModel (see Epic 5). The feature vector is assembled at runtime from the relational database by `gym_coach_brain.data.features.build_feature_vector()`.
+This document defines the complete 19-dimensional feature payload used as input for the RPEModel (see Epic 5). The first 18 features are assembled at runtime by `gym_coach_brain.data.features.build_feature_vector()`, and `muscle_group_fatigue_estimate` is appended by `AdaptationEngine`.
 
 All features are numeric (float or int). No None, no NaN — cold start fallbacks guarantee complete vectors even for new athletes.
 
 ---
 
-## Feature Vector: 14 Features
+## Feature Payload: 19 Features
 
 | # | Feature Name | Type | Range | Normalization | Source (table.column) | Cold Start Fallback |
 |---|---|---|---|---|---|---|
@@ -30,6 +30,11 @@ All features are numeric (float or int). No None, no NaN — cold start fallback
 | 12 | `sessions_count_for_exercise` | int | 0–N | Log1p | COUNT(DISTINCT `workout_sets.session_id`) for exercise | **0** |
 | 13 | `readiness_score` | float | 1.0–10.0 | Min-max (1–10) | `readiness_logs.recovery_score` (most recent) | **5.0** |
 | 14 | `days_since_last_session` | int | 0–N | Log1p | Days since last `workout_sessions` with `status='completed'` | **0** |
+| 15 | `sleep_hours` | float | 0.0–24.0 | Min-max (4–10 typical) | `workout_sessions.sleep_hours` | **7.5** |
+| 16 | `pre_readiness` | int | 1–10 | Min-max (1–10) | `workout_sessions.pre_readiness` | **5** |
+| 17 | `workout_hour_sin` | float | -1.0–1.0 | Already cyclic | `sin(2π * hour / 24)` from `workout_sessions.session_date` | **0.0** |
+| 18 | `workout_hour_cos` | float | -1.0–1.0 | Already cyclic | `cos(2π * hour / 24)` from `workout_sessions.session_date` | **-1.0** |
+| 19 | `muscle_group_fatigue_estimate` | float | 0.0–1.0 | Already normalized | Derived by `AdaptationEngine._estimate_muscle_group_fatigue()` | **0.0** |
 
 ---
 
@@ -63,6 +68,11 @@ When an athlete has no prior history for an exercise, the following fallbacks ap
 | `sessions_count_for_exercise` | **0** | Explicit "no history" signal |
 | `readiness_score` | **5.0** | Neutral recovery — midpoint of 1–10 scale |
 | `days_since_last_session` | **0** | No gap implied for first session |
+| `sleep_hours` | **7.5** | Average sleep duration for cold start |
+| `pre_readiness` | **5** | Neutral pre-workout readiness |
+| `workout_hour_sin` | **0.0** | Hour=12 fallback → `sin(π)` |
+| `workout_hour_cos` | **-1.0** | Hour=12 fallback → `cos(π)` |
+| `muscle_group_fatigue_estimate` | **0.0** | No recent same-muscle history |
 
 ---
 
@@ -74,8 +84,10 @@ When an athlete has no prior history for an exercise, the following fallbacks ap
 |---|---|---|
 | **Embedding** | `exercise_id`, `movement_pattern_id`, `primary_muscle_id`, `equipment_type_int` | Learn dense representation |
 | **Binary passthrough** | `is_compound`, `stretch_mediated` | Already 0/1 |
-| **Min-max [0,1]** | `historical_rpe`, `avg_rpe_last_3`, `readiness_score`, `weight_kg`, `reps`, `set_number` | Bound range |
+| **Min-max [0,1]** | `historical_rpe`, `avg_rpe_last_3`, `readiness_score`, `sleep_hours`, `pre_readiness`, `weight_kg`, `reps`, `set_number` | Bound range |
 | **Log1p → [0,1]** | `sessions_count_for_exercise`, `days_since_last_session` | Handles long tail |
+| **Cyclic passthrough** | `workout_hour_sin`, `workout_hour_cos` | Preserve 24h periodicity |
+| **Normalized passthrough** | `muscle_group_fatigue_estimate` | Already bounded to [0,1] |
 
 ### Suggested normalization constants (to be calibrated from real data):
 
@@ -88,6 +100,8 @@ FEATURE_RANGES = {
     "historical_rpe": (6.0, 10.0),
     "avg_rpe_last_3_sessions_for_exercise": (6.0, 10.0),
     "readiness_score": (1.0, 10.0),
+    "sleep_hours": (4.0, 10.0),
+    "pre_readiness": (1.0, 10.0),
 }
 ```
 
@@ -142,6 +156,31 @@ WHERE status = 'completed' AND id != :session_id
 ORDER BY session_date DESC LIMIT 1;
 ```
 
+### `sleep_hours` / `pre_readiness`
+
+```sql
+SELECT sleep_hours, pre_readiness FROM workout_sessions
+WHERE id = :session_id;
+```
+
+### `workout_hour_sin` / `workout_hour_cos`
+
+Derived from the workout session timestamp:
+
+```python
+hour = dt.hour + dt.minute / 60.0
+workout_hour_sin = math.sin(2 * math.pi * hour / 24)
+workout_hour_cos = math.cos(2 * math.pi * hour / 24)
+```
+
+### `muscle_group_fatigue_estimate`
+
+Computed in `AdaptationEngine` from recent same-muscle completed sessions:
+
+```python
+total_sets / (science.puos.max_sets_per_group * science.ml.fatigue_lookback_sessions)
+```
+
 ---
 
 ## Implementation
@@ -165,7 +204,7 @@ with Session(engine) as session:
         reps=5,
         session=session,
     )
-    # fv.historical_rpe, fv.readiness_score, etc. — all float/int, never None
+    # fv.historical_rpe, fv.sleep_hours, etc. — all float/int, never None
 ```
 
 ---
@@ -174,7 +213,7 @@ with Session(engine) as session:
 
 This document must pass architect review before Epic 5 (ML) begins. Confirm:
 
-- [ ] Feature vector is sufficient for RPEModel training (14 features cover exercise context + athlete history + readiness)
+- [ ] Feature payload is sufficient for RPEModel training (19 features cover exercise context + athlete history + readiness + fatigue)
 - [ ] Cold start strategy is acceptable (6.0 RPE fallback is a reasonable prior)
 - [ ] Normalization strategy is compatible with the planned PyTorch architecture
 - [ ] `sessions_count_for_exercise` provides enough signal despite log1p compression

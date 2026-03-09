@@ -30,7 +30,12 @@ def feature_session(db_session):
 @pytest.fixture
 def session_id(feature_session):
     """Create a placeholder workout session and return its ID."""
-    ws = WorkoutSession(session_date="2026-03-08T10:00:00", status="active")
+    ws = WorkoutSession(
+        session_date="2026-03-08T10:00:00",
+        status="active",
+        sleep_hours=8.0,
+        pre_readiness=7,
+    )
     feature_session.add(ws)
     feature_session.flush()
     return ws.id
@@ -53,7 +58,7 @@ def test_feature_vector_no_none_nan(feature_session, session_id):
         reps=5,
         session=feature_session,
     )
-    # Check all 14 fields
+    # Check all 18 base fields
     for field_name, value in vars(fv).items():
         assert value is not None, f"Field {field_name} is None"
         if isinstance(value, float):
@@ -63,9 +68,12 @@ def test_feature_vector_no_none_nan(feature_session, session_id):
 def test_cold_start(feature_session, session_id):
     """Cold start: athlete with no history uses fallback values (not None, not NaN). [AC cold_start]"""
     exercise = _get_first_exercise(feature_session)
+    cold_start_session = WorkoutSession(session_date="2026-03-08T12:00:00", status="active")
+    feature_session.add(cold_start_session)
+    feature_session.flush()
     fv = build_feature_vector(
         exercise_id=exercise.id,
-        session_id=session_id,
+        session_id=cold_start_session.id,
         set_number=1,
         weight_kg=80.0,
         reps=8,
@@ -77,12 +85,44 @@ def test_cold_start(feature_session, session_id):
     assert fv.sessions_count_for_exercise == 0
     assert fv.readiness_score == 5.0  # default readiness
     assert fv.days_since_last_session == 0  # no prior sessions
+    assert fv.sleep_hours == pytest.approx(7.5)
+    assert fv.pre_readiness == 5
+    assert fv.workout_hour_sin == pytest.approx(0.0)
+    assert fv.workout_hour_cos == pytest.approx(-1.0)
 
     # Verify no None / NaN anywhere
     for field_name, value in vars(fv).items():
         assert value is not None, f"Cold start field {field_name} is None"
         if isinstance(value, float):
             assert not math.isnan(value), f"Cold start field {field_name} is NaN"
+
+
+def test_feature_vector_uses_workout_session_checkin_fields(feature_session):
+    """Feature vector should pull sleep, readiness, and cyclic hour features from WorkoutSession."""
+    exercise = _get_first_exercise(feature_session)
+    ws = WorkoutSession(
+        session_date="2026-03-08T06:30:00",
+        status="active",
+        sleep_hours=6.5,
+        pre_readiness=9,
+    )
+    feature_session.add(ws)
+    feature_session.flush()
+
+    fv = build_feature_vector(
+        exercise_id=exercise.id,
+        session_id=ws.id,
+        set_number=2,
+        weight_kg=82.5,
+        reps=8,
+        session=feature_session,
+    )
+
+    expected_hour = 6.5
+    assert fv.sleep_hours == pytest.approx(6.5)
+    assert fv.pre_readiness == 9
+    assert fv.workout_hour_sin == pytest.approx(math.sin(2 * math.pi * expected_hour / 24))
+    assert fv.workout_hour_cos == pytest.approx(math.cos(2 * math.pi * expected_hour / 24))
 
 
 # ─── SUPPORTING TESTS ─────────────────────────────────────────────────────────
@@ -150,7 +190,7 @@ def test_equipment_type_is_int(feature_session, session_id):
 
 
 def test_all_features_numeric(feature_session, session_id):
-    """All 14 feature vector fields are float or int (never str, bool, None)."""
+    """All 18 base feature vector fields are float or int (never str, bool, None)."""
     exercise = _get_first_exercise(feature_session)
     fv = build_feature_vector(
         exercise_id=exercise.id,

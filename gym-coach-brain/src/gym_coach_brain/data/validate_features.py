@@ -27,7 +27,7 @@ REQUIRED_SCHEMA = {
         "id", "session_id", "exercise_id",
         "set_number", "weight_kg", "reps", "rpe",
     ],
-    "workout_sessions": ["id", "session_date", "status"],
+    "workout_sessions": ["id", "session_date", "status", "sleep_hours", "pre_readiness"],
     "readiness_logs": ["id", "session_date", "recovery_score"],
 }
 
