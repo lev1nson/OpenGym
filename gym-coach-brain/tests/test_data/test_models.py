@@ -555,6 +555,17 @@ def test_user_profile_available_equipment_list_hybrid(db_session):
     assert up.available_equipment_list == ["barbell", "dumbbell"]
 
 
+def test_user_profile_available_equipment_inventory_list_hybrid(db_session):
+    """UserProfile.available_equipment_inventory_list returns parsed JSON list."""
+    up = UserProfile(created_at="2026-03-04T00:00:00")
+    up.available_equipment_inventory_list = ["smith_machine", "leg_curl_machine"]
+    db_session.add(up)
+    db_session.commit()
+    db_session.refresh(up)
+
+    assert up.available_equipment_inventory_list == ["smith_machine", "leg_curl_machine"]
+
+
 def test_user_profile_initial_weight_coefficients_dict_hybrid(db_session):
     """UserProfile.initial_weight_coefficients_dict returns parsed JSON dict."""
     up = UserProfile(created_at="2026-03-04T00:00:00")

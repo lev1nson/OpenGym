@@ -30,3 +30,29 @@ jobs:
 
       - name: Run test suite
         run: uv run pytest
+
+  simulation-matrix:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gym-coach-brain
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: gym-coach-brain/.python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: gym-coach-brain/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Run simulation scenario matrix gate
+        run: uv run pytest tests/test_simulation/test_run.py -k test_system_health_invariants_hold_for_scenario_matrix

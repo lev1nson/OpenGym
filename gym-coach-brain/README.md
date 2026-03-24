@@ -66,6 +66,14 @@ uv sync --locked --dev
 uv run pytest
 ```
 
+Bootstrap the runtime database before starting the daemons. The worker expects
+the migrated schema, including `ml_jobs`, and the reference taxonomy data:
+
+```bash
+uv run alembic upgrade head
+uv run python -m gym_coach_brain.data.seed "$DATABASE_URL"
+```
+
 Copy the unit files into systemd and reload:
 
 ```bash

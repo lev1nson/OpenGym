@@ -72,6 +72,8 @@ def test_readme_documents_operator_deployment_workflow() -> None:
     assert "gym-coach-brain.env.example" in readme_text
     assert "gym-coach-brain.env" in readme_text
     assert "chmod 600" in readme_text
+    assert "uv run alembic upgrade head" in readme_text
+    assert 'uv run python -m gym_coach_brain.data.seed "$DATABASE_URL"' in readme_text
     assert "systemctl enable --now gym-coach-brain-ml.service" in readme_text
     assert "systemctl enable --now gym-coach-brain-bot.service" in readme_text
     assert "journalctl -u gym-coach-brain-ml.service -f" in readme_text

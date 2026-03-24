@@ -119,6 +119,11 @@ class MLConfig(BaseModel):
         trigger model rollback logic in later stories.
     rpe_weight_sensitivity: Fractional weight adjustment applied per RPE point
         between predicted and target RPE.
+    rpe_correction_deadband: Ignore small predicted-vs-target RPE deltas inside
+        this band to avoid oscillating around the target from model noise.
+    min_confidence_correction_scale: Minimum fraction of correction strength
+        applied just above the confidence threshold; scales up to 1.0 as
+        confidence approaches 1.0.
     """
 
     confidence_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
@@ -128,6 +133,8 @@ class MLConfig(BaseModel):
     max_correction_percent: float = Field(default=0.15, ge=0.0, le=1.0)
     anomaly_rollback_threshold: int = Field(default=5, ge=1)
     rpe_weight_sensitivity: float = Field(default=0.025, ge=0.0)
+    rpe_correction_deadband: float = Field(default=0.35, ge=0.0, le=5.0)
+    min_confidence_correction_scale: float = Field(default=0.35, ge=0.0, le=1.0)
 
 
 class SummaryConfig(BaseModel):

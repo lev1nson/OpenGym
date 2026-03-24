@@ -17,6 +17,8 @@ from gym_coach_brain.data.models import (
     Exercise,
     MuscleGroup,
     MovementPattern,
+    RPEPrediction,
+    ReadinessLog,
     TrainingSplit,
     UserProfile,
     WorkoutSession,
@@ -70,6 +72,7 @@ def create_test_user_profile(
     db_session: Session,
     training_split: str = "full_body",
     equipment: list[str] | None = None,
+    inventory: list[str] | None = None,
     goal: str = "hypertrophy",
     bodyweight_kg: float = 80.0,
 ) -> UserProfile:
@@ -77,6 +80,7 @@ def create_test_user_profile(
     profile = UserProfile(
         training_split=training_split,
         available_equipment=json.dumps(equip),
+        available_equipment_inventory=json.dumps(inventory or []),
         goal=goal,
         bodyweight_kg=bodyweight_kg,
         experience_level="intermediate",
@@ -146,6 +150,7 @@ class TestSplitDayLogic:
         mp = create_test_movement_pattern(db_session)
         mg_upper = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
         mg_lower = create_test_muscle_group(db_session, "quads", body_region="lower")
+        create_test_muscle_group(db_session, "abs", body_region="core")
         ex_upper = create_test_exercise(db_session, "bench", mg_upper, mp)
         create_test_exercise(db_session, "squat", mg_lower, mp)
 
@@ -156,7 +161,8 @@ class TestSplitDayLogic:
         plan = planner.generate(profile, mock_science_config, db_session)
 
         assert plan.split_day_label == "lower"
-        assert all("quads" in mg or "lower" in mg.lower() for mg in plan.muscle_groups_today)
+        assert "quads" in plan.muscle_groups_today
+        assert any("abs:no_equipment" == skipped for skipped in plan.skipped_groups)
 
     def test_upper_lower_flip_lower_to_upper(self, db_session, mock_science_config):
         """Previous split_day_label=lower → today=upper."""
@@ -342,6 +348,81 @@ class TestRecoverySignal:
         assert len(plan.exercises) > 0
         assert plan.exercises[0].target_weight_kg == pytest.approx(100.0, abs=0.01)
 
+    def test_previous_low_readiness_session_does_not_permanently_reduce_baseline(
+        self,
+        db_session,
+        mock_science_config,
+    ):
+        """A temporary low-readiness session should not become the next long-term baseline."""
+        mp = create_test_movement_pattern(db_session)
+        mg = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        ex = create_test_exercise(db_session, "bench", mg, mp, equipment_type="barbell")
+
+        session = create_completed_session(
+            db_session,
+            date.today() - timedelta(days=2),
+            split_day_label="full_body",
+            exercise=ex,
+            weight_kg=60.0,
+            reps=8,
+        )
+        db_session.add(
+            ReadinessLog(
+                session_date=session.session_date[:10],
+                sleep_hours=5.0,
+                stress_level=8,
+                hrv_score=None,
+                recovery_score=0.6,
+            )
+        )
+        db_session.flush()
+
+        profile = create_test_user_profile(db_session, training_split="full_body")
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session, recovery_signal=None)
+
+        assert len(plan.exercises) > 0
+        assert plan.exercises[0].target_weight_kg == pytest.approx(100.0, abs=2.5)
+
+    def test_previous_ml_adjustment_does_not_permanently_reduce_baseline(
+        self,
+        db_session,
+        mock_science_config,
+    ):
+        """Prior ML down-adjustment should preserve the recovery-neutral core baseline."""
+        mp = create_test_movement_pattern(db_session)
+        mg = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        ex = create_test_exercise(db_session, "bench_ml", mg, mp, equipment_type="barbell")
+
+        session = create_completed_session(
+            db_session,
+            date.today() - timedelta(days=2),
+            split_day_label="full_body",
+            exercise=ex,
+            weight_kg=60.0,
+            reps=8,
+        )
+        db_session.add(
+            RPEPrediction(
+                session_id=session.id,
+                exercise_id=ex.id,
+                predicted_rpe=8.4,
+                confidence_score=0.82,
+                model_version="test-model",
+                core_weight_kg=80.0,
+                ml_weight_kg=60.0,
+                ml_adjustment_kg=-20.0,
+                anomaly_flag=False,
+                source_label="[AI: -20.0кг / RPE прогноз: 8.4 / confidence: 82%]",
+            )
+        )
+        db_session.flush()
+
+        profile = create_test_user_profile(db_session, training_split="full_body")
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session, recovery_signal=None)
+
+        assert len(plan.exercises) > 0
+        assert plan.exercises[0].target_weight_kg == pytest.approx(80.0, abs=2.5)
+
 
 # ─── Equipment Filter Tests ────────────────────────────────────────────────────
 
@@ -369,6 +450,79 @@ class TestEquipmentFilter:
         plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
 
         assert any("no_equipment" in sg for sg in plan.skipped_groups)
+
+    def test_specific_inventory_blocks_unavailable_same_type_exercise(self, db_session, mock_science_config):
+        """Concrete cable inventory should not unlock every cable exercise."""
+        mp = create_test_movement_pattern(db_session, name="vertical_pull")
+        mg = create_test_muscle_group(db_session, "back", body_region="upper", is_pull=True)
+        create_test_exercise(db_session, "Lat Pulldown", mg, mp, equipment_type="cable")
+        create_test_exercise(db_session, "Cable Row", mg, mp, equipment_type="cable")
+
+        profile = create_test_user_profile(
+            db_session,
+            training_split="full_body",
+            equipment=["cable"],
+            inventory=["high_pulley_cable"],
+        )
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        assert len(plan.exercises) == 1
+        assert plan.exercises[0].exercise_name == "Lat Pulldown"
+
+    def test_bodyweight_fallback_used_when_no_direct_equipment(self, db_session, mock_science_config):
+        """If no direct equipment exists for a group, planner may fill it with bodyweight."""
+        mp_push = create_test_movement_pattern(db_session, name="horizontal_push")
+        mp_pull = create_test_movement_pattern(db_session, name="horizontal_pull")
+        mg_chest = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        mg_back = create_test_muscle_group(db_session, "back", body_region="upper", is_pull=True)
+        create_test_exercise(db_session, "Bench Press", mg_chest, mp_push, equipment_type="barbell")
+        create_test_exercise(db_session, "Push-up", mg_chest, mp_push, equipment_type="bodyweight")
+        create_test_exercise(db_session, "Lat Pulldown", mg_back, mp_pull, equipment_type="cable")
+
+        profile = create_test_user_profile(
+            db_session,
+            training_split="full_body",
+            equipment=["cable"],
+            inventory=["high_pulley_cable"],
+        )
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        names = {exercise.exercise_name for exercise in plan.exercises}
+        assert "Push-up" in names
+        assert "Lat Pulldown" in names
+        assert not any("chest:no_equipment" == skipped for skipped in plan.skipped_groups)
+
+    def test_lower_day_includes_core_bodyweight_fallback(self, db_session, mock_science_config):
+        """upper_lower lower day should include core and fall back to plank when needed."""
+        mp_squat = create_test_movement_pattern(db_session, name="squat")
+        mp_carry = create_test_movement_pattern(db_session, name="carry")
+        mg_upper = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        mg_lower = create_test_muscle_group(db_session, "quads", body_region="lower")
+        mg_core = create_test_muscle_group(db_session, "abs", body_region="core")
+        ex_upper = create_test_exercise(db_session, "bench", mg_upper, mp_squat, equipment_type="barbell")
+        create_test_exercise(db_session, "Smith Squat", mg_lower, mp_squat, equipment_type="machine")
+        create_test_exercise(db_session, "Plank", mg_core, mp_carry, equipment_type="bodyweight")
+        create_test_exercise(db_session, "Ab Wheel Rollout", mg_core, mp_carry, equipment_type="bodyweight")
+
+        create_completed_session(
+            db_session,
+            date.today() - timedelta(days=2),
+            split_day_label="upper",
+            exercise=ex_upper,
+        )
+
+        profile = create_test_user_profile(
+            db_session,
+            training_split="upper_lower",
+            equipment=["machine"],
+            inventory=["smith_machine"],
+        )
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        names = {exercise.exercise_name for exercise in plan.exercises}
+        assert "Smith Squat" in names
+        assert "Plank" in names
+        assert "Ab Wheel Rollout" not in names
 
 
 # ─── Min Rest Days Tests ───────────────────────────────────────────────────────
@@ -664,7 +818,7 @@ class TestPUOS:
 
 class TestMethodologySets:
     def test_sets_are_derived_from_methodology_and_science(self, db_session, mock_science_config):
-        """Planner should derive set count without relying on a missing Methodology.sets attribute."""
+        """Planner derives baseline sets from methodology, then applies exercise heuristics."""
         mp = create_test_movement_pattern(db_session, name="squat")
         mg = create_test_muscle_group(db_session, "quads", body_region="lower")
         create_test_exercise(db_session, "squat", mg, mp, equipment_type="barbell")
@@ -677,10 +831,12 @@ class TestMethodologySets:
         plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
 
         assert len(plan.exercises) == 1
-        assert plan.exercises[0].sets == (
+        baseline_sets = (
             mock_science_config.puos.max_sets_per_group
             // mock_science_config.methodologies.strength.frequency_per_week_min
         )
+        assert plan.exercises[0].sets == baseline_sets - 1
+        assert plan.exercises[0].rep_range == (1, 5)
 
 
 # ─── Antagonist Balance Tests ──────────────────────────────────────────────────

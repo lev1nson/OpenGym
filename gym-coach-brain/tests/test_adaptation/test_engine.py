@@ -12,6 +12,7 @@ from gym_coach_brain.adaptation.engine import (
     AdaptationEngine,
     AdaptationResult,
     _is_plateau,
+    rpe_to_weight,
 )
 from gym_coach_brain.core.readiness import RecoverySignal
 from gym_coach_brain.data.models import (
@@ -19,6 +20,7 @@ from gym_coach_brain.data.models import (
     EquipmentType,
     MuscleGroup,
     MovementPattern,
+    ReadinessLog,
     RPEPrediction,
     WorkoutSession,
     WorkoutSet,
@@ -346,6 +348,40 @@ def test_rpe_hard_threshold_from_science_config(mock_science_config, db_session)
     assert result.exercises[0].target_weight_kg < 80.0  # weight should have decreased
 
 
+def test_rpe_to_weight_ignores_small_deviations_inside_deadband(mock_science_config):
+    """Small target misses inside the deadband should not change the working weight."""
+    adjusted = rpe_to_weight(
+        predicted_rpe=7.9,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.95,
+    )
+
+    assert adjusted == pytest.approx(80.0)
+
+
+def test_rpe_to_weight_scales_correction_strength_by_confidence(mock_science_config):
+    """Higher confidence should apply a stronger correction than a barely-valid prediction."""
+    low_conf_adjusted = rpe_to_weight(
+        predicted_rpe=6.0,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.61,
+    )
+    high_conf_adjusted = rpe_to_weight(
+        predicted_rpe=6.0,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.95,
+    )
+
+    assert low_conf_adjusted > 80.0
+    assert high_conf_adjusted > low_conf_adjusted
+
+
 def test_latest_db_prediction_is_selected_for_exercise(mock_science_config, db_session):
     """Newest DB prediction for (session, exercise) must win over older rows."""
     ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
@@ -661,6 +697,89 @@ def test_previous_performance_prefers_working_set_weight_for_pyramid_sessions(
     assert result.exercises[0].target_reps == 9
 
 
+def test_previous_performance_normalizes_temporary_low_readiness_weight(
+    mock_science_config,
+    db_session,
+):
+    """Double progression should use the recovery-neutral baseline from the previous session."""
+    ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
+    user = _make_user_profile()
+
+    completed_session = _make_completed_session_with_sets(
+        db_session,
+        exercise_id=ex.id,
+        date="2026-03-07T10:00:00",
+        weight_kg=60.0,
+        reps=8,
+    )
+    db_session.add(
+        ReadinessLog(
+            session_date="2026-03-07",
+            sleep_hours=5.0,
+            stress_level=8,
+            hrv_score=None,
+            recovery_score=0.6,
+        )
+    )
+    db_session.flush()
+
+    session = _make_session(db_session, [
+        {"exercise_id": ex.id, "exercise_name": "Bench Press", "sets": 3, "target_weight_kg": 60.0}
+    ])
+
+    engine = AdaptationEngine(rpe_model=None)
+    result = engine.adapt(session, user, None, mock_science_config, db_session)
+
+    assert completed_session.id is not None
+    assert result.exercises[0].target_weight_kg == pytest.approx(100.0, abs=2.5)
+    assert result.exercises[0].target_reps == 9
+
+
+def test_previous_performance_uses_core_weight_after_ml_down_adjustment(
+    mock_science_config,
+    db_session,
+):
+    """A prior ML-only reduction should not permanently reset the progression baseline."""
+    ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
+    user = _make_user_profile()
+
+    completed_session = _make_completed_session_with_sets(
+        db_session,
+        exercise_id=ex.id,
+        date="2026-03-07T10:00:00",
+        weight_kg=60.0,
+        reps=8,
+    )
+    _make_rpe_prediction(
+        db_session,
+        session_id=completed_session.id,
+        exercise_id=ex.id,
+        predicted_rpe=8.4,
+        confidence_score=0.82,
+    )
+    prediction = (
+        db_session.query(RPEPrediction)
+        .filter_by(session_id=completed_session.id, exercise_id=ex.id)
+        .one()
+    )
+    prediction.core_weight_kg = 80.0
+    prediction.ml_weight_kg = 60.0
+    prediction.ml_adjustment_kg = -20.0
+    prediction.anomaly_flag = False
+    prediction.source_label = "[AI: -20.0кг / RPE прогноз: 8.4 / confidence: 82%]"
+    db_session.flush()
+
+    session = _make_session(db_session, [
+        {"exercise_id": ex.id, "exercise_name": "Bench Press", "sets": 3, "target_weight_kg": 60.0}
+    ])
+
+    engine = AdaptationEngine(rpe_model=None)
+    result = engine.adapt(session, user, None, mock_science_config, db_session)
+
+    assert result.exercises[0].target_weight_kg == pytest.approx(80.0, abs=2.5)
+    assert result.exercises[0].target_reps == 9
+
+
 def test_direct_ml_path_scales_final_weight_by_recovery_coefficient(
     mock_science_config,
     db_session,
@@ -693,7 +812,7 @@ def test_direct_ml_path_scales_final_weight_by_recovery_coefficient(
     result = engine.adapt(session, user, recovery_signal, mock_science_config, db_session)
 
     assert result.exercises[0].used_ml is True
-    assert result.exercises[0].target_weight_kg == pytest.approx(70.0)
+    assert result.exercises[0].target_weight_kg == pytest.approx(67.5)
 
 
 def test_fatigue_lookback_sessions_is_independent_from_rest_days(mock_science_config, db_session):
@@ -793,7 +912,7 @@ def test_ml_path_increments_reps_on_easy_rpe_when_weight_holds(mock_science_conf
     engine = AdaptationEngine(rpe_model=model)
     result = engine.adapt(session, user, None, mock_science_config, db_session)
 
-    assert result.exercises[0].target_weight_kg == pytest.approx(85.0)
+    assert result.exercises[0].target_weight_kg == pytest.approx(82.5)
     assert result.exercises[0].target_reps == 6 # reset to min because weight increased
 
     # Case 2: keep the same final weight by zeroing ML sensitivity.
@@ -832,8 +951,8 @@ def test_bounded_correction_within_limit(mock_science_config, db_session):
     assert prediction.anomaly_flag is False
     assert prediction.source_label.startswith("[AI:")
     assert prediction.core_weight_kg == pytest.approx(80.0)
-    assert prediction.ml_weight_kg == pytest.approx(81.1)
-    assert prediction.ml_adjustment_kg == pytest.approx(1.1)
+    assert prediction.ml_weight_kg == pytest.approx(80.2765)
+    assert prediction.ml_adjustment_kg == pytest.approx(0.2765)
 
 
 def test_bounded_correction_exceeds_limit(mock_science_config, db_session):

@@ -31,6 +31,28 @@ FEATURE_FIELD_ORDER = [
     "muscle_group_fatigue_estimate",
 ]
 
+_FEATURE_SCALES = {
+    "exercise_id": 64.0,
+    "movement_pattern_id": 16.0,
+    "primary_muscle_id": 16.0,
+    "is_compound": 1.0,
+    "stretch_mediated": 1.0,
+    "equipment_type_int": 8.0,
+    "set_number": 10.0,
+    "weight_kg": 200.0,
+    "reps": 30.0,
+    "historical_rpe": 10.0,
+    "avg_rpe_last_3_sessions_for_exercise": 10.0,
+    "sessions_count_for_exercise": 50.0,
+    "readiness_score": 10.0,
+    "days_since_last_session": 30.0,
+    "sleep_hours": 12.0,
+    "pre_readiness": 10.0,
+    "workout_hour_sin": 1.0,
+    "workout_hour_cos": 1.0,
+    "muscle_group_fatigue_estimate": 1.0,
+}
+
 
 class RPEModel(RPEModelProtocol):
     """PyTorch MLP for RPE prediction with MC Dropout inference."""
@@ -59,7 +81,14 @@ class RPEModel(RPEModelProtocol):
             )
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, 1))
-        return nn.Sequential(*layers)
+        network = nn.Sequential(*layers)
+
+        # Bias the untrained model toward a plausible mid-effort RPE instead of
+        # letting raw feature magnitudes push predictions into clamp extremes.
+        output_layer = network[-1]
+        nn.init.normal_(output_layer.weight, mean=0.0, std=0.01)
+        nn.init.constant_(output_layer.bias, 7.0)
+        return network
 
     def _get_network(self):
         if self._network is None:
@@ -72,7 +101,10 @@ class RPEModel(RPEModelProtocol):
     def _features_to_tensor(self, features: dict):
         import torch
 
-        values = [float(features.get(field_name, 0.0)) for field_name in FEATURE_FIELD_ORDER]
+        values = [
+            float(features.get(field_name, 0.0)) / _FEATURE_SCALES[field_name]
+            for field_name in FEATURE_FIELD_ORDER
+        ]
         if len(values) != self._feature_dim:
             raise ValueError(
                 f"Expected {self._feature_dim} features, got {len(values)}"
@@ -93,7 +125,7 @@ class RPEModel(RPEModelProtocol):
 
         mean_rpe = sum(samples) / len(samples)
         std_rpe = float(torch.tensor(samples, dtype=torch.float32).std(unbiased=False).item())
-        confidence = max(0.0, min(1.0, 1.0 - std_rpe))
+        confidence = max(0.0, min(1.0, 1.0 / (1.0 + std_rpe)))
         mean_rpe = max(1.0, min(10.0, float(mean_rpe)))
         return mean_rpe, confidence
 
@@ -139,7 +171,7 @@ class RPEModel(RPEModelProtocol):
         ewc = EWC(self, lambda_=100.0)
         ewc.update_fisher(training_samples)
 
-        optimizer = optim.SGD(network.parameters(), lr=lr)
+        optimizer = optim.Adam(network.parameters(), lr=lr / 2)
         criterion = nn.MSELoss()
 
         network.train()
@@ -148,11 +180,12 @@ class RPEModel(RPEModelProtocol):
                 if "target_rpe" not in sample:
                     continue
                 x = self._features_to_tensor(sample)
-                target = torch.tensor([[float(sample["target_rpe"])]], dtype=torch.float32)
+                target = torch.tensor([float(sample["target_rpe"])], dtype=torch.float32)
                 optimizer.zero_grad()
-                out = self._forward(x).unsqueeze(0)
+                out = self._forward(x)
                 loss = criterion(out, target) + ewc.penalty(self)
                 loss.backward()
+                nn.utils.clip_grad_norm_(network.parameters(), max_norm=1.0)
                 optimizer.step()
 
     @property

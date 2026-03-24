@@ -40,7 +40,10 @@ from gym_coach_brain.data.queue import enqueue_fine_tune, enqueue_predict
 from gym_coach_brain.data.seed import seed_all
 from gym_coach_brain.ml.model import RPEModel
 from gym_coach_brain.ml.worker import MLWorker
-from gym_coach_brain.simulation.synthetic_athlete import SyntheticAthlete
+from gym_coach_brain.simulation.synthetic_athlete import (
+    SyntheticAthlete,
+    get_simulation_scenario,
+)
 
 if TYPE_CHECKING:
     from gym_coach_brain.core.science import ScienceConfig
@@ -96,7 +99,11 @@ class SimulationMetrics:
         sim_date: date,
         source_labels: list[str],
         weights: dict[str, float],
+        split_label: str,
+        target_rpe: float,
+        exercise_names: list[str],
         anomaly_flags: list[bool] | None = None,
+        exercise_dimensions: dict[str, dict[str, str]] | None = None,
     ) -> None:
         ai = sum(1 for lbl in source_labels if lbl.startswith("[AI:"))
         # Use explicit anomaly_flag from DB (authoritative) when available; fall back to
@@ -113,11 +120,15 @@ class SimulationMetrics:
             "anomaly": anomaly,
             "core": core,
             "total": len(source_labels),
+            "split_label": split_label,
+            "target_rpe": target_rpe,
+            "exercise_names": list(exercise_names),
         })
         self.weight_records.append({
             "idx": idx,
             "date": sim_date.isoformat(),
             "weights": dict(weights),
+            "exercise_dimensions": dict(exercise_dimensions or {}),
         })
 
     def record_rpe(self, idx: int, predicted: float | None, actual: float) -> None:
@@ -146,6 +157,357 @@ class SimulationMetrics:
         ai = sum(r["ai"] for r in records)
         return ai / max(1, total)
 
+    def weight_history_by_exercise(self) -> dict[str, list[dict[str, object]]]:
+        """Return per-exercise ordered weight history across recorded sessions."""
+        history: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for record in self.weight_records:
+            for exercise_name, weight in record["weights"].items():
+                history[exercise_name].append({
+                    "idx": record["idx"],
+                    "date": record["date"],
+                    "weight": weight,
+                })
+        return dict(history)
+
+    def weight_history_by_dimension(self, dimension: str) -> dict[str, list[dict[str, object]]]:
+        """Return per-dimension aggregated weight history across sessions.
+
+        Aggregates multiple exercises in the same dimension within one session via mean weight.
+        Supported dimensions: movement_pattern, primary_muscle, equipment_type,
+        exercise_cluster, exercise_family.
+        """
+        if dimension == "exercise":
+            return self.weight_history_by_exercise()
+
+        history: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for record in self.weight_records:
+            exercise_dimensions = record.get("exercise_dimensions", {})
+            bucketed_weights: dict[str, list[float]] = defaultdict(list)
+            for exercise_name, weight in record["weights"].items():
+                metadata = exercise_dimensions.get(exercise_name, {})
+                dimension_key = metadata.get(dimension)
+                if not dimension_key:
+                    continue
+                bucketed_weights[dimension_key].append(float(weight))
+
+            for dimension_key, weights in bucketed_weights.items():
+                history[dimension_key].append({
+                    "idx": record["idx"],
+                    "date": record["date"],
+                    "weight": sum(weights) / len(weights),
+                })
+
+        return dict(history)
+
+    def _transition_counts(
+        self,
+        weights: list[float],
+        *,
+        hold_tolerance_kg: float,
+    ) -> dict[str, float]:
+        increases = 0
+        holds = 0
+        decreases = 0
+        for prev, current in zip(weights, weights[1:]):
+            delta = current - prev
+            if abs(delta) <= hold_tolerance_kg:
+                holds += 1
+            elif delta > 0:
+                increases += 1
+            else:
+                decreases += 1
+        total_transitions = increases + holds + decreases
+        return {
+            "increases": increases,
+            "holds": holds,
+            "decreases": decreases,
+            "total_transitions": total_transitions,
+            "decrease_ratio": decreases / total_transitions if total_transitions else 0.0,
+        }
+
+    def _dimension_exercise_histories(
+        self,
+        dimension: str,
+    ) -> dict[str, dict[str, list[dict[str, object]]]]:
+        """Return histories grouped as dimension -> exercise -> entries.
+
+        Dimension health should aggregate exercise-level trajectories, not raw kg means
+        across unrelated exercises. This avoids false degradation signals when a
+        dimension mixes weighted and bodyweight movements.
+        """
+        grouped: dict[str, dict[str, list[dict[str, object]]]] = defaultdict(dict)
+        exercise_history = self.weight_history_by_exercise()
+        exercise_to_dimension: dict[str, str] = {}
+
+        for record in self.weight_records:
+            exercise_dimensions = record.get("exercise_dimensions", {})
+            for exercise_name, metadata in exercise_dimensions.items():
+                dimension_key = metadata.get(dimension)
+                if dimension_key:
+                    exercise_to_dimension[exercise_name] = dimension_key
+
+        for exercise_name, entries in exercise_history.items():
+            dimension_key = exercise_to_dimension.get(exercise_name)
+            if dimension_key:
+                grouped[dimension_key][exercise_name] = entries
+
+        return dict(grouped)
+
+    def _direction_summary_for_history(
+        self,
+        history: dict[str, list[dict[str, object]]],
+        hold_tolerance_kg: float = 0.25,
+    ) -> dict[str, float]:
+        increases = 0
+        holds = 0
+        decreases = 0
+        tracked_entities = 0
+
+        for entries in history.values():
+            weights = [float(entry["weight"]) for entry in entries]
+            if len(weights) < 2 or max(weights) <= hold_tolerance_kg:
+                continue
+            tracked_entities += 1
+            for prev, current in zip(weights, weights[1:]):
+                delta = current - prev
+                if abs(delta) <= hold_tolerance_kg:
+                    holds += 1
+                elif delta > 0:
+                    increases += 1
+                else:
+                    decreases += 1
+
+        total_transitions = increases + holds + decreases
+        decrease_ratio = decreases / total_transitions if total_transitions else 0.0
+        return {
+            "tracked_entities": tracked_entities,
+            "increases": increases,
+            "holds": holds,
+            "decreases": decreases,
+            "total_transitions": total_transitions,
+            "decrease_ratio": decrease_ratio,
+        }
+
+    def load_direction_summary(self, hold_tolerance_kg: float = 0.25) -> dict[str, float]:
+        """Summarize increase/hold/decrease transitions across weighted exercises."""
+        summary = self._direction_summary_for_history(
+            self.weight_history_by_exercise(),
+            hold_tolerance_kg=hold_tolerance_kg,
+        )
+        summary["weighted_exercises"] = summary["tracked_entities"]
+        return summary
+
+    def dimension_load_direction_summary(
+        self,
+        dimension: str,
+        hold_tolerance_kg: float = 0.25,
+    ) -> dict[str, float]:
+        """Summarize increase/hold/decrease transitions for a non-exercise dimension."""
+        grouped_history = self._dimension_exercise_histories(dimension)
+        tracked_dimensions = 0
+        increases = 0
+        holds = 0
+        decreases = 0
+
+        for exercise_histories in grouped_history.values():
+            dimension_has_signal = False
+            for entries in exercise_histories.values():
+                weights = [float(entry["weight"]) for entry in entries]
+                if len(weights) < 2 or max(weights) <= hold_tolerance_kg:
+                    continue
+                dimension_has_signal = True
+                counts = self._transition_counts(weights, hold_tolerance_kg=hold_tolerance_kg)
+                increases += int(counts["increases"])
+                holds += int(counts["holds"])
+                decreases += int(counts["decreases"])
+            if dimension_has_signal:
+                tracked_dimensions += 1
+
+        total_transitions = increases + holds + decreases
+        return {
+            "tracked_entities": tracked_dimensions,
+            "tracked_dimensions": tracked_dimensions,
+            "increases": increases,
+            "holds": holds,
+            "decreases": decreases,
+            "total_transitions": total_transitions,
+            "decrease_ratio": decreases / total_transitions if total_transitions else 0.0,
+        }
+
+    def degradation_flags(
+        self,
+        *,
+        hold_tolerance_kg: float = 0.25,
+        min_observations: int = 3,
+        moderate_drop_ratio: float = 0.15,
+        severe_drop_ratio: float = 0.30,
+        decrease_ratio_threshold: float = 0.60,
+    ) -> list[dict[str, object]]:
+        """Return weighted exercises that show sustained downward load drift."""
+        return self.dimension_degradation_flags(
+            "exercise",
+            hold_tolerance_kg=hold_tolerance_kg,
+            min_observations=min_observations,
+            moderate_drop_ratio=moderate_drop_ratio,
+            severe_drop_ratio=severe_drop_ratio,
+            decrease_ratio_threshold=decrease_ratio_threshold,
+        )
+
+    def dimension_degradation_flags(
+        self,
+        dimension: str,
+        *,
+        hold_tolerance_kg: float = 0.25,
+        min_observations: int = 3,
+        moderate_drop_ratio: float = 0.15,
+        severe_drop_ratio: float = 0.30,
+        decrease_ratio_threshold: float = 0.60,
+        min_flagged_member_ratio: float = 0.50,
+        min_flagged_members: int = 2,
+        min_systemic_member_exercises: int = 2,
+    ) -> list[dict[str, object]]:
+        """Return broad dimension-level entities that show sustained downward load drift.
+
+        Non-exercise dimensions are meant to capture class-level bias, not a single
+        degraded movement masquerading as a systemic issue. Singleton buckets remain
+        visible at exercise level and are excluded from dimension flags until the
+        dimension has enough weighted members to represent a reusable class.
+        """
+        if dimension == "exercise":
+            history = self.weight_history_by_exercise()
+            flagged: list[dict[str, object]] = []
+
+            for entity_name, entries in history.items():
+                weights = [float(entry["weight"]) for entry in entries]
+                if len(weights) < min_observations or max(weights) <= hold_tolerance_kg:
+                    continue
+
+                counts = self._transition_counts(weights, hold_tolerance_kg=hold_tolerance_kg)
+                first_weight = weights[0]
+                last_weight = weights[-1]
+                peak_weight = max(weights)
+                drop_from_start = (
+                    (first_weight - last_weight) / first_weight
+                    if first_weight > hold_tolerance_kg
+                    else 0.0
+                )
+                drop_from_peak = (
+                    (peak_weight - last_weight) / peak_weight
+                    if peak_weight > hold_tolerance_kg
+                    else 0.0
+                )
+
+                if counts["decrease_ratio"] < decrease_ratio_threshold or drop_from_peak < moderate_drop_ratio:
+                    continue
+
+                severity = "high" if (
+                    drop_from_peak >= severe_drop_ratio and drop_from_start >= moderate_drop_ratio
+                ) else "medium"
+                flagged.append({
+                    "entity": entity_name,
+                    "observations": len(weights),
+                    "first_weight": first_weight,
+                    "last_weight": last_weight,
+                    "peak_weight": peak_weight,
+                    "increases": counts["increases"],
+                    "holds": counts["holds"],
+                    "decreases": counts["decreases"],
+                    "decrease_ratio": counts["decrease_ratio"],
+                    "drop_from_start": drop_from_start,
+                    "drop_from_peak": drop_from_peak,
+                    "severity": severity,
+                })
+
+            return sorted(
+                flagged,
+                key=lambda item: (
+                    0 if item["severity"] == "high" else 1,
+                    -float(item["drop_from_peak"]),
+                    -float(item["decrease_ratio"]),
+                    str(item["entity"]),
+                ),
+            )
+
+        flagged: list[dict[str, object]] = []
+        grouped_history = self._dimension_exercise_histories(dimension)
+        exercise_flags = self.degradation_flags(
+            hold_tolerance_kg=hold_tolerance_kg,
+            min_observations=min_observations,
+            moderate_drop_ratio=moderate_drop_ratio,
+            severe_drop_ratio=severe_drop_ratio,
+            decrease_ratio_threshold=decrease_ratio_threshold,
+        )
+        exercise_flag_map = {str(flag["entity"]): flag for flag in exercise_flags}
+
+        for entity_name, exercise_histories in grouped_history.items():
+            member_exercises = 0
+            increases = 0
+            holds = 0
+            decreases = 0
+            flagged_members: list[dict[str, object]] = []
+
+            for exercise_name, entries in exercise_histories.items():
+                weights = [float(entry["weight"]) for entry in entries]
+                if len(weights) < min_observations or max(weights) <= hold_tolerance_kg:
+                    continue
+                member_exercises += 1
+                counts = self._transition_counts(weights, hold_tolerance_kg=hold_tolerance_kg)
+                increases += int(counts["increases"])
+                holds += int(counts["holds"])
+                decreases += int(counts["decreases"])
+                if exercise_name in exercise_flag_map:
+                    flagged_members.append(exercise_flag_map[exercise_name])
+
+            total_transitions = increases + holds + decreases
+            if member_exercises == 0 or total_transitions == 0:
+                continue
+            if member_exercises < min_systemic_member_exercises:
+                continue
+
+            decrease_ratio = decreases / total_transitions
+            flagged_member_count = len(flagged_members)
+            flagged_member_ratio = flagged_member_count / member_exercises
+            systemic_flag = (
+                flagged_member_count >= min_flagged_members
+                or flagged_member_ratio >= min_flagged_member_ratio
+            )
+
+            if not flagged_members or not systemic_flag or decrease_ratio < decrease_ratio_threshold:
+                continue
+
+            worst_member = max(
+                flagged_members,
+                key=lambda item: (
+                    0 if item["severity"] == "high" else 1,
+                    -float(item["drop_from_peak"]),
+                    -float(item["decrease_ratio"]),
+                ),
+            )
+            severity = "high" if any(flag["severity"] == "high" for flag in flagged_members) else "medium"
+            flagged.append({
+                "entity": entity_name,
+                "member_exercises": member_exercises,
+                "flagged_member_exercises": flagged_member_count,
+                "flagged_member_ratio": flagged_member_ratio,
+                "increases": increases,
+                "holds": holds,
+                "decreases": decreases,
+                "decrease_ratio": decrease_ratio,
+                "worst_member": worst_member["entity"],
+                "worst_drop_from_peak": worst_member["drop_from_peak"],
+                "severity": severity,
+            })
+
+        return sorted(
+            flagged,
+            key=lambda item: (
+                0 if item["severity"] == "high" else 1,
+                -float(item["worst_drop_from_peak"]),
+                -float(item["decrease_ratio"]),
+                str(item["entity"]),
+            ),
+        )
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -164,7 +526,68 @@ def _build_session_dates(
     return dates
 
 
-def _plan_to_json(plan: object) -> str:
+def _derive_exercise_cluster(exercise_row: "Exercise") -> str:
+    """Map an exercise to a reusable logic cluster for system-level health checks."""
+    movement_pattern = (
+        exercise_row.movement_pattern.name
+        if exercise_row.movement_pattern is not None
+        else "unknown"
+    )
+    equipment_type = exercise_row.equipment_type.value
+    is_compound = bool(exercise_row.is_compound)
+
+    if movement_pattern == "carry":
+        return "weighted_carry" if equipment_type != "bodyweight" else "bodyweight_carry"
+
+    if equipment_type == "bodyweight":
+        if movement_pattern in {"horizontal_push", "vertical_push"}:
+            return "bodyweight_push"
+        if movement_pattern in {"horizontal_pull", "vertical_pull"}:
+            return "bodyweight_pull"
+        if movement_pattern in {"squat", "hinge"}:
+            return "bodyweight_lower"
+        return "bodyweight_other"
+
+    if is_compound:
+        if movement_pattern in {"horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"}:
+            return "weighted_compound_upper"
+        if movement_pattern in {"squat", "hinge"}:
+            return "weighted_compound_lower"
+    else:
+        if movement_pattern in {"horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"}:
+            return "weighted_isolation_upper"
+        if movement_pattern in {"squat", "hinge"}:
+            return "weighted_isolation_lower"
+
+    return "weighted_other" if equipment_type != "bodyweight" else "bodyweight_other"
+
+
+def _derive_exercise_family(exercise_row: "Exercise") -> str:
+    """Map an exercise to a narrower reusable family than the cluster-level grouping."""
+    movement_pattern = (
+        exercise_row.movement_pattern.name
+        if exercise_row.movement_pattern is not None
+        else "unknown"
+    )
+    equipment_type = exercise_row.equipment_type.value
+    load_mode = "compound" if bool(exercise_row.is_compound) else "isolation"
+
+    if equipment_type in {"cable", "machine"}:
+        equipment_family = "guided"
+    elif equipment_type in {"pullup_bar", "dips_bar"}:
+        equipment_family = "bodyweight_station"
+    elif equipment_type == "resistance_band":
+        equipment_family = "band"
+    else:
+        equipment_family = equipment_type
+
+    if movement_pattern == "carry":
+        return f"carry_{equipment_family}"
+
+    return f"{load_mode}_{movement_pattern}_{equipment_family}"
+
+
+def _plan_to_json(plan: object, *, target_rpe: float) -> str:
     """Serialize WorkoutPlan exercises to JSON for WorkoutSession.planned_exercises."""
     return json.dumps([
         {
@@ -173,9 +596,50 @@ def _plan_to_json(plan: object) -> str:
             "sets": pe.sets,                     # type: ignore[attr-defined]
             "target_weight_kg": pe.target_weight_kg,  # type: ignore[attr-defined]
             "target_reps": (pe.rep_range[0] + pe.rep_range[1]) // 2,  # type: ignore[attr-defined]
+            "target_rpe": target_rpe,
         }
         for pe in plan.exercises  # type: ignore[attr-defined]
     ])
+
+
+def _append_dimension_health_section(
+    lines: list[str],
+    *,
+    title: str,
+    entity_label: str,
+    summary: dict[str, float],
+    flags: list[dict[str, object]],
+) -> None:
+    lines += [
+        "",
+        f"## {title}",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Tracked {entity_label} groups | {int(summary['tracked_dimensions'])} |",
+        f"| Increase transitions | {int(summary['increases'])} |",
+        f"| Hold transitions | {int(summary['holds'])} |",
+        f"| Decrease transitions | {int(summary['decreases'])} |",
+        f"| Decrease ratio | {summary['decrease_ratio'] * 100:.1f}% |",
+        f"| Flagged {entity_label} groups | {len(flags)} |",
+        "",
+        f"## {title} Flags",
+        "",
+    ]
+
+    if flags:
+        lines += [
+            f"| Severity | {entity_label.title()} | Exercises | Flagged | Flagged % | Inc | Hold | Dec | Decrease ratio | Worst member | Worst drop |",
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for flag in flags:
+            lines.append(
+                "| {severity} | {entity} | {member_exercises} | {flagged_member_exercises} | "
+                "{flagged_member_ratio:.0%} | {increases} | {holds} | {decreases} | {decrease_ratio:.0%} | "
+                "{worst_member} | {worst_drop_from_peak:.0%} |".format(**flag)
+            )
+    else:
+        lines.append(f"No {entity_label} flags detected.")
 
 
 # ─── Core simulation runner ───────────────────────────────────────────────────
@@ -188,6 +652,8 @@ def run_simulation(
     model_dir: Path | None = None,
     science: "ScienceConfig | None" = None,
     engine=None,
+    scenario_name: str = "ppl_hypertrophy_gym",
+    user_profile_overrides: dict | None = None,
 ) -> SimulationMetrics:
     """Run the full E2E simulation and return collected metrics.
 
@@ -199,11 +665,15 @@ def run_simulation(
         model_dir: Directory for ML checkpoints (temp dir if None).
         science: Pre-loaded ScienceConfig (loads from ScienceEvidence.md if None).
         engine: SQLAlchemy engine (creates in-memory SQLite if None).
+        scenario_name: Registered scenario profile + mesocycle wave.
+        user_profile_overrides: Optional UserProfile field overrides for scenario customization.
     """
     # ── Seed RNGs for determinism ──────────────────────────────────────────────
     import torch  # lazy import to keep module importable without PyTorch installed in CI
     rng = random.Random(seed)
     torch.manual_seed(seed)
+
+    scenario = get_simulation_scenario(scenario_name)
 
     # ── Science config ─────────────────────────────────────────────────────────
     if science is None:
@@ -222,7 +692,11 @@ def run_simulation(
 
     # ── Create synthetic athlete profile ───────────────────────────────────────
     with Session(engine) as db:
-        profile_kwargs = SyntheticAthlete.create_user_profile_data()
+        profile_kwargs = SyntheticAthlete.create_user_profile_data(
+            scenario_name=scenario_name,
+            training_days_per_week=sessions_per_week,
+            overrides=user_profile_overrides,
+        )
         user_profile = UserProfile(**profile_kwargs)
         db.add(user_profile)
         db.commit()
@@ -249,7 +723,11 @@ def run_simulation(
     real_model.save(model_dir / "model_v1.pt")
 
     # ── Simulation objects ─────────────────────────────────────────────────────
-    athlete = SyntheticAthlete(rng)
+    athlete = SyntheticAthlete(
+        rng,
+        scenario=scenario,
+        sessions_per_week=sessions_per_week,
+    )
     planner = WorkoutPlanner()
     adaptation_engine = AdaptationEngine(rpe_model=None)  # uses DB-mediated predictions
     metrics = SimulationMetrics()
@@ -267,6 +745,12 @@ def run_simulation(
 
     for session_idx, sim_date in enumerate(session_dates):
         signals = athlete.generate_session_signals(session_idx)
+        is_anomaly_session = _ANOMALY_START <= session_idx < _ANOMALY_START + _ANOMALY_LENGTH
+        session_target_rpe = (
+            max(signals.target_rpe, 7.5)
+            if is_anomaly_session
+            else signals.target_rpe
+        )
 
         # Build simulated workout datetime (19:00 ± offset)
         raw_minute = 0 + signals.workout_minute_offset
@@ -291,12 +775,13 @@ def run_simulation(
                 sleep_hours=signals.sleep_hours,
                 stress_level=stress_level,
                 hrv_score=None,
-                recovery_score=max(0.0, min(1.0, signals.sleep_hours / 8.0)),
+                recovery_score=1.0,
             )
             db.add(readiness_log)
             db.flush()
 
             recovery_signal = calculate_recovery_signal(readiness_log, science)
+            readiness_log.recovery_score = recovery_signal.coefficient
 
             # Load profile for planner (needs training_split, equipment, etc.)
             user_profile = db.get(UserProfile, user_profile_id)
@@ -324,7 +809,7 @@ def run_simulation(
             session_row = WorkoutSession(
                 session_date=sim_datetime.isoformat(),
                 status="active",
-                planned_exercises=_plan_to_json(plan),
+                planned_exercises=_plan_to_json(plan, target_rpe=session_target_rpe),
                 split_day_label=plan.split_day_label,
                 sleep_hours=signals.sleep_hours,
                 pre_readiness=signals.pre_readiness,
@@ -346,7 +831,6 @@ def run_simulation(
         is_cold_start = session_idx < _COLD_START_SESSIONS
         if not is_cold_start:
             # Inject anomaly model for fault-injection window (AC 8)
-            is_anomaly_session = _ANOMALY_START <= session_idx < _ANOMALY_START + _ANOMALY_LENGTH
             if is_anomaly_session:
                 worker.model = anomaly_model
                 metrics.record_anomaly_event(
@@ -366,8 +850,12 @@ def run_simulation(
         source_labels: list[str] = []
         anomaly_flags: list[bool] = []
         exercise_weights: dict[str, float] = {}
+        exercise_names: list[str] = []
+        exercise_dimensions: dict[str, dict[str, str]] = {}
 
         with Session(engine) as db:
+            from gym_coach_brain.data.models import Exercise
+
             session_row = db.get(WorkoutSession, session_id)
             user_profile = db.get(UserProfile, user_profile_id)
 
@@ -407,6 +895,24 @@ def run_simulation(
             # Create WorkoutSet rows with synthetic actual RPE (AC 2, 5)
             for adapted_ex in adaptation.exercises:
                 exercise_weights[adapted_ex.exercise_name] = adapted_ex.target_weight_kg
+                exercise_names.append(adapted_ex.exercise_name)
+                exercise_row = db.get(Exercise, adapted_ex.exercise_id)
+                if exercise_row is not None:
+                    exercise_dimensions[adapted_ex.exercise_name] = {
+                        "movement_pattern": (
+                            exercise_row.movement_pattern.name
+                            if exercise_row.movement_pattern is not None
+                            else "unknown"
+                        ),
+                        "primary_muscle": (
+                            exercise_row.primary_muscle.name
+                            if exercise_row.primary_muscle is not None
+                            else "unknown"
+                        ),
+                        "equipment_type": exercise_row.equipment_type.value,
+                        "exercise_cluster": _derive_exercise_cluster(exercise_row),
+                        "exercise_family": _derive_exercise_family(exercise_row),
+                    }
 
                 # Source label from DB prediction (authoritative after adaptation update)
                 pred = pred_by_exercise.get(adapted_ex.exercise_id)
@@ -415,7 +921,7 @@ def run_simulation(
                 anomaly_flags.append(bool(pred.anomaly_flag) if pred else False)
 
                 # Generate synthetic actual RPE outcomes for each set
-                target_rpe = 7.5  # nominal training intensity target
+                target_rpe = session_target_rpe
                 for set_num in range(1, adapted_ex.sets + 1):
                     actual_rpe = athlete.generate_set_rpe(target_rpe, session_idx)
                     actual_rir = max(0, min(4, round(10.0 - actual_rpe)))
@@ -439,7 +945,17 @@ def run_simulation(
             db.commit()
 
         completed_session_ids.append(session_id)
-        metrics.record_session(session_idx, sim_date, source_labels, exercise_weights, anomaly_flags)
+        metrics.record_session(
+            session_idx,
+            sim_date,
+            source_labels,
+            exercise_weights,
+            plan.split_day_label,
+            session_target_rpe,
+            exercise_names,
+            anomaly_flags,
+            exercise_dimensions,
+        )
 
         logger.debug(
             "Session {idx} ({date}) complete: {n_ex} exercises, split={split}",
@@ -468,7 +984,7 @@ def run_simulation(
     # ── Write report ───────────────────────────────────────────────────────────
     if output_path is None:
         output_path = Path("_bmad-output/simulation-report.md")
-    _write_report(metrics, output_path, months, sessions_per_week, seed)
+    _write_report(metrics, output_path, months, sessions_per_week, seed, scenario_name)
 
     if _tmp_dir is not None:
         _tmp_dir.cleanup()
@@ -488,6 +1004,7 @@ def _write_report(
     months: int,
     sessions_per_week: int,
     seed: int,
+    scenario_name: str,
 ) -> None:
     """Write markdown simulation report to output_path."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -496,17 +1013,39 @@ def _write_report(
     total_ai = sum(r["ai"] for r in metrics.session_records)
     total_anomaly = sum(r["anomaly"] for r in metrics.session_records)
     total_core = sum(r["core"] for r in metrics.session_records)
+    split_counts: dict[str, int] = defaultdict(int)
+    target_rpe_counts: dict[str, int] = defaultdict(int)
+    exercise_coverage: dict[str, int] = defaultdict(int)
+
+    for record in metrics.session_records:
+        split_counts[str(record["split_label"])] += 1
+        target_rpe_counts[f'{record["target_rpe"]:.1f}'] += 1
+        for exercise_name in record["exercise_names"]:
+            exercise_coverage[exercise_name] += 1
 
     def pct(n: int) -> str:
         return f"{n / max(1, total_exercises) * 100:.1f}%"
 
     mae_early = metrics.mae_for_window(0, 10)
     mae_late = metrics.mae_for_window(50, total_sessions)
+    load_summary = metrics.load_direction_summary()
+    degradation_flags = metrics.degradation_flags()
+    pattern_summary = metrics.dimension_load_direction_summary("movement_pattern")
+    pattern_flags = metrics.dimension_degradation_flags("movement_pattern")
+    muscle_summary = metrics.dimension_load_direction_summary("primary_muscle")
+    muscle_flags = metrics.dimension_degradation_flags("primary_muscle")
+    equipment_summary = metrics.dimension_load_direction_summary("equipment_type")
+    equipment_flags = metrics.dimension_degradation_flags("equipment_type")
+    cluster_summary = metrics.dimension_load_direction_summary("exercise_cluster")
+    cluster_flags = metrics.dimension_degradation_flags("exercise_cluster")
+    family_summary = metrics.dimension_load_direction_summary("exercise_family")
+    family_flags = metrics.dimension_degradation_flags("exercise_family")
 
     lines: list[str] = [
         "# OpenGym Simulation Report",
         "",
         f"**Parameters:** {months} months, {sessions_per_week}×/week, seed={seed}",
+        f"**Scenario:** {scenario_name}",
         f"**Total sessions simulated:** {total_sessions}",
         f"**Total exercise decisions:** {total_exercises}",
         "",
@@ -535,20 +1074,120 @@ def _write_report(
         f"**MAE sessions 1–10:** {f'{mae_early:.3f}' if mae_early is not None else 'N/A'}",
         f"**MAE sessions 51+:** {f'{mae_late:.3f}' if mae_late is not None else 'N/A'}",
         "",
+        "## Split Rotation Coverage",
+        "",
+        "| Split | Sessions |",
+        "|---|---|",
+    ]
+
+    for split_label, count in sorted(split_counts.items()):
+        lines.append(f"| {split_label} | {count} |")
+
+    lines += [
+        "",
+        "## Intensity Wave Coverage",
+        "",
+        "| Target RPE | Sessions |",
+        "|---|---|",
+    ]
+
+    for target_rpe, count in sorted(target_rpe_counts.items()):
+        lines.append(f"| {target_rpe} | {count} |")
+
+    lines += [
+        "",
+        "## Exercise Coverage",
+        "",
+        "| Exercise | Sessions Present |",
+        "|---|---|",
+    ]
+
+    for exercise_name, count in sorted(exercise_coverage.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"| {exercise_name} | {count} |")
+
+    lines += [
+        "",
+        "## Simulation Health",
+        "",
+        "| Metric | Value |",
+        "|---|---|",
+        f"| Weighted exercises tracked | {int(load_summary['weighted_exercises'])} |",
+        f"| Increase transitions | {int(load_summary['increases'])} |",
+        f"| Hold transitions | {int(load_summary['holds'])} |",
+        f"| Decrease transitions | {int(load_summary['decreases'])} |",
+        f"| Decrease ratio | {load_summary['decrease_ratio'] * 100:.1f}% |",
+        f"| Exercises flagged for degradation | {len(degradation_flags)} |",
+        "",
+        "## Degradation Flags",
+        "",
+    ]
+
+    if degradation_flags:
+        lines += [
+            "| Severity | Exercise | Obs | Inc | Hold | Dec | First kg | Last kg | Peak kg | Drop vs peak |",
+            "|---|---|---|---|---|---|---|---|---|---|",
+        ]
+        for flag in degradation_flags:
+            lines.append(
+                "| {severity} | {entity} | {observations} | {increases} | {holds} | "
+                "{decreases} | {first_weight:.1f} | {last_weight:.1f} | "
+                "{peak_weight:.1f} | {drop_from_peak:.0%} |".format(**flag)
+            )
+    else:
+        lines.append("No weighted degradation flags detected.")
+
+    _append_dimension_health_section(
+        lines,
+        title="Movement Pattern Health",
+        entity_label="movement pattern",
+        summary=pattern_summary,
+        flags=pattern_flags,
+    )
+    _append_dimension_health_section(
+        lines,
+        title="Primary Muscle Health",
+        entity_label="primary muscle",
+        summary=muscle_summary,
+        flags=muscle_flags,
+    )
+    _append_dimension_health_section(
+        lines,
+        title="Equipment Type Health",
+        entity_label="equipment type",
+        summary=equipment_summary,
+        flags=equipment_flags,
+    )
+    _append_dimension_health_section(
+        lines,
+        title="Exercise Cluster Health",
+        entity_label="exercise cluster",
+        summary=cluster_summary,
+        flags=cluster_flags,
+    )
+    _append_dimension_health_section(
+        lines,
+        title="Exercise Family Health",
+        entity_label="exercise family",
+        summary=family_summary,
+        flags=family_flags,
+    )
+
+    lines += [
+        "",
         "## Weight Progression (Sample Exercises)",
         "",
     ]
 
-    # Collect up to 3 exercise names seen across sessions
+    # Collect up to 6 exercise names seen across sessions for a broader sample.
     seen_exercises: list[str] = []
     for wr in metrics.weight_records:
         for name in wr["weights"]:
             if name not in seen_exercises:
                 seen_exercises.append(name)
-        if len(seen_exercises) >= 3:
+        if len(seen_exercises) >= 6:
             break
 
-    for ex_name in seen_exercises[:3]:
+    for ex_name in seen_exercises[:6]:
         lines += [f"### {ex_name}", "", "| Session | Date | Weight (kg) |", "|---|---|---|"]
         for wr in metrics.weight_records:
             if ex_name in wr["weights"]:
@@ -581,6 +1220,7 @@ def main() -> None:
     parser.add_argument("--months", type=int, default=6)
     parser.add_argument("--sessions-per-week", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--scenario", type=str, default="ppl_hypertrophy_gym")
     parser.add_argument("--output", type=str, default=None)
     parser.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -590,6 +1230,7 @@ def main() -> None:
         sessions_per_week=args.sessions_per_week,
         seed=args.seed,
         output_path=Path(args.output) if args.output else None,
+        scenario_name=args.scenario,
     )
 
 

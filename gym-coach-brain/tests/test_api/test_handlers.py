@@ -373,6 +373,7 @@ def test_profile_show_returns_formatted_text(onboarding_session, mock_science):
     assert "Профиль атлета" in stdout
     assert "Вес тела" in stdout
     assert "Сплит" in stdout
+    assert "Конкретный инвентарь" in stdout
 
 
 def test_profile_show_no_profile_returns_error(onboarding_session):
@@ -391,8 +392,34 @@ def test_profile_update_equipment_valid(onboarding_session, mock_science):
     profile = onboarding_session.query(UserProfile).first()
     assert profile is not None
     eq = json.loads(profile.available_equipment)
+    inventory = json.loads(profile.available_equipment_inventory)
     assert "bodyweight" in eq
     assert "barbell" in eq
+    assert "bodyweight" in inventory
+    assert "barbell" in inventory
+
+
+def test_profile_update_equipment_specific_inventory(onboarding_session, mock_science):
+    handle_onboarding_start([], onboarding_session, mock_science)
+
+    stdout, exit_code = handle_profile_update_equipment(
+        ["--equipment", "smith machine, leg curl machine, lat pulldown, dumbbells, adjustable bench"],
+        onboarding_session,
+    )
+    assert exit_code == 0
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    eq = json.loads(profile.available_equipment)
+    inventory = json.loads(profile.available_equipment_inventory)
+    assert set(eq) == {"machine", "cable", "dumbbell"}
+    assert set(inventory) == {
+        "smith_machine",
+        "leg_curl_machine",
+        "high_pulley_cable",
+        "dumbbells",
+        "adjustable_bench",
+    }
+    assert "Инвентарь" in stdout
 
 
 def test_profile_update_equipment_invalid_type(onboarding_session, mock_science):

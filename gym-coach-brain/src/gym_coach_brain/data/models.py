@@ -103,6 +103,8 @@ class UserProfile(Base):
     initial_weight_coefficients = Column(Text, nullable=True)
     # JSON list of EquipmentType values
     available_equipment = Column(Text, nullable=True, default="[]")
+    # JSON list of concrete inventory item IDs (e.g. smith_machine, leg_curl_machine)
+    available_equipment_inventory = Column(Text, nullable=True, default="[]")
     # SQLAlchemyEnum per AC — validated at DB (CHECK constraint) and ORM level
     training_split = Column(
         SAEnum(TrainingSplit, name="trainingsplit"),
@@ -139,6 +141,15 @@ class UserProfile(Base):
     @available_equipment_list.setter
     def available_equipment_list(self, value: list) -> None:
         self.available_equipment = json.dumps(value)
+
+    @hybrid_property
+    def available_equipment_inventory_list(self) -> list:
+        """JSON list of concrete inventory item IDs."""
+        return json.loads(self.available_equipment_inventory or "[]")
+
+    @available_equipment_inventory_list.setter
+    def available_equipment_inventory_list(self, value: list) -> None:
+        self.available_equipment_inventory = json.dumps(value)
 
     @hybrid_property
     def initial_weight_coefficients_dict(self) -> dict:

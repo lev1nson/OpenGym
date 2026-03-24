@@ -17,6 +17,7 @@ References:
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -83,11 +84,18 @@ def rpe_to_weight(
     target_rpe: float,
     core_weight_kg: float,
     science: "ScienceConfig",
+    confidence: float | None = None,
 ) -> float:
     """Convert an RPE prediction into a bounded candidate weight."""
     if core_weight_kg <= 0:
         return 0.0
-    adjustment_ratio = science.ml.rpe_weight_sensitivity * (predicted_rpe - target_rpe)
+    adjustment_ratio = science.ml.rpe_weight_sensitivity * _effective_rpe_error(
+        predicted_rpe=predicted_rpe,
+        target_rpe=target_rpe,
+        science=science,
+    )
+    if confidence is not None:
+        adjustment_ratio *= _confidence_correction_scale(confidence, science)
     return max(0.0, core_weight_kg * (1.0 - adjustment_ratio))
 
 
@@ -224,13 +232,20 @@ class AdaptationEngine:
             if db_prediction and db_prediction.confidence_score >= science.ml.confidence_threshold:
                 ml_rpe = db_prediction.predicted_rpe
                 ml_confidence = db_prediction.confidence_score
-                ml_weight_kg = rpe_to_weight(
+                raw_ml_weight_kg = rpe_to_weight(
                     predicted_rpe=ml_rpe,
                     target_rpe=_resolve_target_rpe(planned_ex, science),
                     core_weight_kg=core_weight_kg,
                     science=science,
                 )
-                delta_percent = _compute_delta_percent(core_weight_kg, ml_weight_kg)
+                ml_weight_kg = rpe_to_weight(
+                    predicted_rpe=ml_rpe,
+                    target_rpe=_resolve_target_rpe(planned_ex, science),
+                    core_weight_kg=core_weight_kg,
+                    science=science,
+                    confidence=ml_confidence,
+                )
+                delta_percent = _compute_delta_percent(core_weight_kg, raw_ml_weight_kg)
                 if delta_percent > science.ml.max_correction_percent:
                     fallback_reason = "ml correction exceeded safety bound"
                     anomaly_flag = True
@@ -273,13 +288,20 @@ class AdaptationEngine:
                 if conf >= science.ml.confidence_threshold:
                     ml_rpe = rpe_pred
                     ml_confidence = conf
-                    ml_weight_kg = rpe_to_weight(
+                    raw_ml_weight_kg = rpe_to_weight(
                         predicted_rpe=rpe_pred,
                         target_rpe=_resolve_target_rpe(planned_ex, science),
                         core_weight_kg=core_weight_kg,
                         science=science,
                     )
-                    delta_percent = _compute_delta_percent(core_weight_kg, ml_weight_kg)
+                    ml_weight_kg = rpe_to_weight(
+                        predicted_rpe=rpe_pred,
+                        target_rpe=_resolve_target_rpe(planned_ex, science),
+                        core_weight_kg=core_weight_kg,
+                        science=science,
+                        confidence=conf,
+                    )
+                    delta_percent = _compute_delta_percent(core_weight_kg, raw_ml_weight_kg)
                     if delta_percent > science.ml.max_correction_percent:
                         fallback_reason = "ml correction exceeded safety bound"
                         anomaly_flag = True
@@ -418,6 +440,31 @@ def _compute_delta_percent(core_weight_kg: float, ml_weight_kg: float) -> float:
     return abs(ml_weight_kg - core_weight_kg) / core_weight_kg
 
 
+def _effective_rpe_error(
+    predicted_rpe: float,
+    target_rpe: float,
+    science: "ScienceConfig",
+) -> float:
+    """Ignore small target misses so ML does not oscillate around steady-state loads."""
+    error = predicted_rpe - target_rpe
+    deadband = science.ml.rpe_correction_deadband
+    if abs(error) <= deadband:
+        return 0.0
+    return math.copysign(abs(error) - deadband, error)
+
+
+def _confidence_correction_scale(confidence: float, science: "ScienceConfig") -> float:
+    """Scale correction strength smoothly between threshold and full confidence."""
+    threshold = science.ml.confidence_threshold
+    if confidence <= threshold:
+        return 0.0
+    if threshold >= 1.0:
+        return 1.0
+    normalized = min(1.0, max(0.0, (confidence - threshold) / (1.0 - threshold)))
+    min_scale = science.ml.min_confidence_correction_scale
+    return min_scale + (1.0 - min_scale) * normalized
+
+
 def _format_ai_source_label(
     ml_weight_kg: float,
     core_weight_kg: float,
@@ -553,7 +600,7 @@ def _get_previous_performance(
     """
     from sqlalchemy import and_, or_
 
-    from gym_coach_brain.data.models import WorkoutSession, WorkoutSet
+    from gym_coach_brain.data.models import ReadinessLog, RPEPrediction, WorkoutSession, WorkoutSet
 
     # Filter for sessions that are completed AND occurred before current session
     latest_session_row = (
@@ -609,6 +656,33 @@ def _get_previous_performance(
         if abs(workout_set.weight_kg - working_weight) <= 1e-9
     ]
     achieved_reps = min(workout_set.reps for workout_set in working_sets)
+    prediction = (
+        db_session.query(RPEPrediction)
+        .filter_by(session_id=latest_session_id, exercise_id=exercise_id)
+        .order_by(RPEPrediction.created_at.desc(), RPEPrediction.id.desc())
+        .first()
+    )
+    if prediction is not None and prediction.core_weight_kg is not None:
+        working_weight = float(prediction.core_weight_kg)
+
+    previous_session = db_session.get(WorkoutSession, latest_session_id)
+    readiness_log = None
+    if previous_session is not None and previous_session.session_date:
+        readiness_log = (
+            db_session.query(ReadinessLog)
+            .filter_by(session_date=previous_session.session_date[:10])
+            .first()
+        )
+    recovery_score = (
+        float(readiness_log.recovery_score)
+        if readiness_log is not None and readiness_log.recovery_score is not None
+        else 1.0
+    )
+    if (
+        recovery_score > 0.0
+        and not (prediction is not None and prediction.core_weight_kg is not None)
+    ):
+        working_weight = working_weight / recovery_score
     return ExercisePerformanceSnapshot(
         current_weight=float(working_weight),
         current_reps=_clamp_target_reps(achieved_reps, rep_range),

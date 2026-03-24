@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
+from gym_coach_brain.core.equipment_inventory import (
+    SUPPORTED_INVENTORY_IDS,
+    exercise_available_for_profile,
+    resolve_equipment_answer,
+)
 from gym_coach_brain.data.models import EquipmentType, Exercise, TrainingSplit, UserProfile
 
 if TYPE_CHECKING:
@@ -68,9 +73,12 @@ QUESTIONS: list[OnboardingQuestion] = [
     ),
     OnboardingQuestion(
         id="equipment",
-        text="Какое оборудование вам доступно? (можно выбрать несколько)",
+        text=(
+            "Какое оборудование вам доступно? Можно перечислять конкретные тренажёры "
+            "и инвентарь: smith machine, chest press machine, lat pulldown, dumbbells, barbell"
+        ),
         type=QuestionType.MULTI_CHOICE,
-        options=[e.value for e in EquipmentType],
+        options=list(SUPPORTED_INVENTORY_IDS) + [e.value for e in EquipmentType],
     ),
     OnboardingQuestion(
         id="training_days_per_week",
@@ -150,14 +158,7 @@ def map_answer_to_coefficients(question_id: str, answer: str) -> dict[str, float
         return {"training_split": split}
 
     if question_id == "equipment":
-        # answer expected as comma-separated or JSON list
-        if answer.startswith("["):
-            items = json.loads(answer)
-        else:
-            items = [a.strip() for a in answer.split(",") if a.strip()]
-        # validate each item is a valid EquipmentType
-        validated = [EquipmentType(item) for item in items]
-        return {"available_equipment": json.dumps([e.value for e in validated])}
+        return resolve_equipment_answer(answer)
 
     if question_id == "experience_level":
         return {"experience_level": answer}
@@ -225,11 +226,18 @@ def get_available_exercises(user_profile: UserProfile, session: Session) -> list
         List of Exercise objects matching at least one equipment type in available_equipment
     """
     equipment_list = json.loads(user_profile.available_equipment or "[]")
-    if not equipment_list:
+    inventory_list = json.loads(user_profile.available_equipment_inventory or "[]")
+    if not equipment_list and not inventory_list:
         return []
 
-    return (
-        session.query(Exercise)
-        .filter(Exercise.equipment_type.in_(equipment_list))
-        .all()
-    )
+    exercises = session.query(Exercise).all()
+    return [
+        exercise
+        for exercise in exercises
+        if exercise_available_for_profile(
+            exercise,
+            user_profile,
+            allow_bodyweight_fallback=False,
+            allow_unrestricted_if_empty=False,
+        )
+    ]

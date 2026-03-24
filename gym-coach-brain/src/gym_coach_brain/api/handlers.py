@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, selectinload
 from gym_coach_brain.adaptation.recap import generate_recap
 from gym_coach_brain.adaptation.summary import generate_summary
 from gym_coach_brain.core.apre import calculate_apre_adjustment, rpe_from_rir
+from gym_coach_brain.core.equipment_inventory import concrete_inventory_labels
 from gym_coach_brain.core.onboarding import (
     QUESTIONS,
     QuestionType,
@@ -344,7 +345,10 @@ def handle_profile_show(argv: list[str], session: Session) -> tuple[str, int]:
         return "Профиль не найден. Запустите onboarding_start для создания профиля.", 1
 
     equipment_list = json.loads(profile.available_equipment or "[]")
+    inventory_list = json.loads(profile.available_equipment_inventory or "[]")
     equipment_str = ", ".join(equipment_list) if equipment_list else "не задано"
+    inventory_labels = concrete_inventory_labels(inventory_list)
+    inventory_str = ", ".join(inventory_labels) if inventory_labels else "не задан"
     weights_dict = json.loads(profile.initial_weight_coefficients or "{}")
     weights_str = (
         "\n".join(f"  {pattern}: {weight} кг" for pattern, weight in weights_dict.items())
@@ -359,7 +363,8 @@ def handle_profile_show(argv: list[str], session: Session) -> tuple[str, int]:
         f"Вес тела: {profile.bodyweight_kg or 'не задан'} кг\n"
         f"Тренировок в неделю: {profile.training_days_per_week}\n"
         f"Сплит: {profile.training_split}\n"
-        f"Оборудование: {equipment_str}\n\n"
+        f"Типы оборудования: {equipment_str}\n"
+        f"Конкретный инвентарь: {inventory_str}\n\n"
         f"Стартовые веса:\n{weights_str}",
         0,
     )
@@ -372,7 +377,7 @@ def handle_profile_update_equipment(argv: list[str], session: Session) -> tuple[
     try:
         args = parser.parse_args(argv)
     except SystemExit:
-        return "profile_update_equipment: required --equipment <types>", 1
+        return "profile_update_equipment: required --equipment <types-or-concrete-items>", 1
 
     profile = _get_or_none(session)
     if profile is None:
@@ -384,10 +389,13 @@ def handle_profile_update_equipment(argv: list[str], session: Session) -> tuple[
         return f"Некорректный тип оборудования: {exc}", 1
 
     profile.available_equipment = updates["available_equipment"]
+    profile.available_equipment_inventory = updates.get("available_equipment_inventory", "[]")
     session.flush()
 
     exercises = get_available_exercises(profile, session)
     equipment_list = json.loads(profile.available_equipment)
+    inventory_list = json.loads(profile.available_equipment_inventory or "[]")
+    inventory_labels = concrete_inventory_labels(inventory_list)
     exercise_names = sorted(ex.name for ex in exercises)
     preview_count = 12
     shown = exercise_names[:preview_count]
@@ -397,7 +405,9 @@ def handle_profile_update_equipment(argv: list[str], session: Session) -> tuple[
         overflow = f"\n… и ещё {len(exercise_names) - preview_count}"
 
     return (
-        f"✅ Оборудование обновлено: {', '.join(equipment_list)}\n"
+        f"✅ Оборудование обновлено\n"
+        f"Типы: {', '.join(equipment_list) if equipment_list else 'не определены'}\n"
+        f"Инвентарь: {', '.join(inventory_labels) if inventory_labels else 'не указан'}\n"
         f"Всего доступных упражнений: {len(exercises)}\n"
         f"Доступные упражнения: {shown_text}{overflow}",
         0,

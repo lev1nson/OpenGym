@@ -102,18 +102,43 @@ def test_map_equipment_single():
     result = map_answer_to_coefficients("equipment", "bodyweight")
     equipment = json.loads(result["available_equipment"])
     assert equipment == ["bodyweight"]
+    inventory = json.loads(result["available_equipment_inventory"])
+    assert inventory == ["bodyweight"]
 
 
 def test_map_equipment_multiple_comma_separated():
     result = map_answer_to_coefficients("equipment", "barbell, dumbbell, bodyweight")
     equipment = json.loads(result["available_equipment"])
     assert set(equipment) == {"barbell", "dumbbell", "bodyweight"}
+    inventory = json.loads(result["available_equipment_inventory"])
+    assert set(inventory) == {"barbell", "dumbbells", "bodyweight"}
 
 
 def test_map_equipment_json_list():
     result = map_answer_to_coefficients("equipment", '["barbell", "bodyweight"]')
     equipment = json.loads(result["available_equipment"])
     assert set(equipment) == {"barbell", "bodyweight"}
+    inventory = json.loads(result["available_equipment_inventory"])
+    assert set(inventory) == {"barbell", "bodyweight"}
+
+
+def test_map_equipment_specific_inventory_derives_broad_types():
+    result = map_answer_to_coefficients(
+        "equipment",
+        "smith machine, chest press machine, leg curl machine, lat pulldown, dumbbells, barbell, adjustable bench",
+    )
+    equipment = json.loads(result["available_equipment"])
+    inventory = json.loads(result["available_equipment_inventory"])
+    assert set(equipment) == {"machine", "cable", "dumbbell", "barbell"}
+    assert set(inventory) == {
+        "smith_machine",
+        "chest_press_machine",
+        "leg_curl_machine",
+        "high_pulley_cable",
+        "dumbbells",
+        "barbell",
+        "adjustable_bench",
+    }
 
 
 def test_map_invalid_training_split_raises():
@@ -214,6 +239,18 @@ def test_get_available_exercises_multiple_equipment(seeded_session):
     exercises = get_available_exercises(profile, seeded_session)
     types = {ex.equipment_type for ex in exercises}
     assert EquipmentType.barbell in types or EquipmentType.bodyweight in types
+
+
+def test_get_available_exercises_specific_inventory_filters_same_broad_type(seeded_session):
+    profile = UserProfile(
+        available_equipment=json.dumps(["cable"]),
+        available_equipment_inventory=json.dumps(["high_pulley_cable"]),
+    )
+    exercises = get_available_exercises(profile, seeded_session)
+    names = {ex.name for ex in exercises}
+    assert "Lat Pulldown" in names
+    assert "Tricep Pushdown" in names
+    assert "Cable Row" not in names
 
 
 def test_get_available_exercises_empty_equipment_returns_empty(seeded_session):

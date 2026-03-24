@@ -152,6 +152,26 @@ _EXERCISES_PHASE2 = [
     ("Calf Raise (standing)", "calves",      "squat",           [],                                 False, True,  "bodyweight"),
 ]
 
+# Phase 3: Machine-based exercises for gym members with machine equipment
+_EXERCISES_PHASE3 = [
+    # horizontal_push +1
+    # [Source: ExRx.net — Machine Chest Press: same mechanics as bench press, chest primary]
+    ("Machine Chest Press",    "chest",       "horizontal_push", ["shoulders", "triceps"],            True,  False, "machine"),
+    # vertical_push +1
+    # [Source: ExRx.net — Machine Shoulder Press: same mechanics as OHP, shoulders primary]
+    ("Machine Shoulder Press", "shoulders",   "vertical_push",   ["chest", "triceps"],               True,  False, "machine"),
+    # squat +1
+    # [Source: ExRx.net — Smith Squat: squat pattern on Smith machine, quads primary]
+    ("Smith Squat",            "quadriceps",  "squat",           ["glutes"],                         True,  False, "machine"),
+    # hinge +1
+    # [Source: ExRx.net — Machine Leg Curl: hamstrings isolation, prone or seated]
+    ("Machine Leg Curl",       "hamstrings",  "hinge",           [],                                 False, True,  "machine"),
+    # squat +1
+    # [Source: ExRx.net — Machine Leg Extension: quads isolation, seated or lying]
+    ("Machine Leg Extension",  "quadriceps",  "squat",           [],                                 False, False, "machine"),
+]
+
+
 # ─── Equipment seed data ───────────────────────────────────────────────────────
 # ⚠️ Names MUST match Alembic 002_seed_data.py exactly — idempotency on prod DB
 
@@ -171,9 +191,9 @@ _EQUIPMENT = [
 
 
 # Merged constant for seed function
-# Total: 37 exercises
-# Distribution: h_push=7, v_push=4, h_pull=6, v_pull=4, squat=5, hinge=7, carry=4
-_EXERCISES = _EXERCISES_PHASE1 + _EXERCISES_PHASE2
+# Total: 42 exercises (37 + 5 machine-based)
+# Distribution: h_push=8, v_push=5, h_pull=6, v_pull=4, squat=7, hinge=8, carry=4
+_EXERCISES = _EXERCISES_PHASE1 + _EXERCISES_PHASE2 + _EXERCISES_PHASE3
 
 
 def seed_muscle_groups(session: Session) -> int:

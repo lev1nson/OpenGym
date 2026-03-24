@@ -11,6 +11,7 @@ No shared memory with the API process. All IPC is DB-mediated.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -316,13 +317,20 @@ class MLWorker:
 
                 if confidence >= confidence_threshold:
                     target_rpe = _resolve_target_rpe(planned_ex, self._science)
-                    ml_weight_kg = _rpe_to_weight(
+                    raw_ml_weight_kg = _rpe_to_weight(
                         predicted_rpe=predicted_rpe,
                         target_rpe=target_rpe,
                         core_weight_kg=core_weight_kg,
                         science=self._science,
                     )
-                    delta_percent = _compute_delta_percent(core_weight_kg, ml_weight_kg)
+                    ml_weight_kg = _rpe_to_weight(
+                        predicted_rpe=predicted_rpe,
+                        target_rpe=target_rpe,
+                        core_weight_kg=core_weight_kg,
+                        science=self._science,
+                        confidence=confidence,
+                    )
+                    delta_percent = _compute_delta_percent(core_weight_kg, raw_ml_weight_kg)
                     anomaly_flag = (
                         delta_percent > self._science.ml.max_correction_percent
                     )
@@ -656,10 +664,17 @@ def _rpe_to_weight(
     target_rpe: float,
     core_weight_kg: float,
     science: "ScienceConfig",
+    confidence: float | None = None,
 ) -> float:
     if core_weight_kg <= 0:
         return 0.0
-    adjustment_ratio = science.ml.rpe_weight_sensitivity * (predicted_rpe - target_rpe)
+    adjustment_ratio = science.ml.rpe_weight_sensitivity * _effective_rpe_error(
+        predicted_rpe=predicted_rpe,
+        target_rpe=target_rpe,
+        science=science,
+    )
+    if confidence is not None:
+        adjustment_ratio *= _confidence_correction_scale(confidence, science)
     return max(0.0, core_weight_kg * (1.0 - adjustment_ratio))
 
 
@@ -667,6 +682,31 @@ def _compute_delta_percent(core_weight_kg: float, ml_weight_kg: float) -> float:
     if core_weight_kg <= 0:
         return 0.0
     return abs(ml_weight_kg - core_weight_kg) / core_weight_kg
+
+
+def _effective_rpe_error(
+    predicted_rpe: float,
+    target_rpe: float,
+    science: "ScienceConfig",
+) -> float:
+    """Ignore small target misses so worker predictions do not oscillate around steady state."""
+    error = predicted_rpe - target_rpe
+    deadband = science.ml.rpe_correction_deadband
+    if abs(error) <= deadband:
+        return 0.0
+    return math.copysign(abs(error) - deadband, error)
+
+
+def _confidence_correction_scale(confidence: float, science: "ScienceConfig") -> float:
+    """Scale correction strength smoothly between threshold and full confidence."""
+    threshold = science.ml.confidence_threshold
+    if confidence <= threshold:
+        return 0.0
+    if threshold >= 1.0:
+        return 1.0
+    normalized = min(1.0, max(0.0, (confidence - threshold) / (1.0 - threshold)))
+    min_scale = science.ml.min_confidence_correction_scale
+    return min_scale + (1.0 - min_scale) * normalized
 
 
 def _format_ai_source_label(

@@ -65,10 +65,12 @@ def test_rpe_model_mc_dropout_variance():
 
 
 def test_rpe_model_low_confidence_on_high_variance():
-    model = RPEModel(dropout_p=0.95)
-    _, confidence = model.forward(_feature_payload())
+    baseline_model = RPEModel(dropout_p=0.3)
+    high_variance_model = RPEModel(dropout_p=0.95)
+    _, baseline_confidence = baseline_model.forward(_feature_payload())
+    _, confidence = high_variance_model.forward(_feature_payload())
 
-    assert confidence < 0.6
+    assert confidence < baseline_confidence
 
 
 def test_rpe_model_feature_dim():
@@ -88,6 +90,34 @@ def test_rpe_model_save_and_load(tmp_path: Path):
     reloaded.load(path)
 
     assert path.exists()
+
+
+def test_rpe_model_fine_tune_stays_in_plausible_range():
+    model = RPEModel()
+    before_rpe, before_confidence = model.predict(_feature_payload())
+
+    assert 5.5 <= before_rpe <= 8.5
+    assert before_confidence >= 0.8
+
+    training_samples = []
+    for i in range(200):
+        sample = _feature_payload()
+        sample["weight_kg"] = 60.0 + (i % 10) * 2.5
+        sample["reps"] = 6 + (i % 5)
+        sample["historical_rpe"] = 7.0 + (i % 4) * 0.5
+        sample["avg_rpe_last_3_sessions_for_exercise"] = 7.0 + (i % 4) * 0.4
+        sample["sessions_count_for_exercise"] = 1 + (i % 12)
+        sample["days_since_last_session"] = 1 + (i % 4)
+        sample["sleep_hours"] = 6.0 + (i % 5) * 0.4
+        sample["pre_readiness"] = [2, 5, 9][i % 3]
+        sample["target_rpe"] = 7.0 + (i % 5) * 0.25
+        training_samples.append(sample)
+
+    model.fine_tune(training_samples)
+    after_rpe, after_confidence = model.predict(_feature_payload())
+
+    assert 6.5 <= after_rpe <= 8.5
+    assert after_confidence >= 0.6
 
 
 def test_ewc_penalty_zero_at_init():

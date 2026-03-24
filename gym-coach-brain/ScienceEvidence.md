@@ -73,6 +73,8 @@ ml:
   max_correction_percent: 0.15  # float — max ML delta as fraction of core weight (±15%)
   anomaly_rollback_threshold: 5  # int — consecutive anomalies before model rollback
   rpe_weight_sensitivity: 0.025  # float — weight change per RPE unit (~2.5% per RPE unit)
+  rpe_correction_deadband: 0.35  # float — ignore small predicted-vs-target RPE deltas inside this band to reduce oscillation
+  min_confidence_correction_scale: 0.35  # float — correction strength just above threshold, scales to 1.0 as confidence approaches 1.0
 
 plateau_detection_sessions: 3  # int — number of consecutive sessions without progress to trigger plateau warning
 

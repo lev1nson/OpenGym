@@ -30,7 +30,7 @@ from gym_coach_brain.data.models import (
     WorkoutSet,
 )
 from gym_coach_brain.data.queue import enqueue_fine_tune, enqueue_predict, update_job_status
-from gym_coach_brain.ml.worker import MLWorker
+from gym_coach_brain.ml.worker import MLWorker, _rpe_to_weight
 
 
 # ─── DB seed helpers ──────────────────────────────────────────────────────────
@@ -421,6 +421,40 @@ def test_predict_job_persists_rpe_predictions(db_engine, mock_science_config):
         assert pred.confidence_score == pytest.approx(0.85)
         assert pred.anomaly_flag is False  # confidence 0.85 >= 0.6 threshold
         assert pred.exercise_id == exercise_id
+
+
+def test_worker_rpe_to_weight_ignores_small_deviations_inside_deadband(mock_science_config):
+    """Worker-side helper should hold weight when prediction is close enough to target."""
+    adjusted = _rpe_to_weight(
+        predicted_rpe=7.9,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.95,
+    )
+
+    assert adjusted == pytest.approx(80.0)
+
+
+def test_worker_rpe_to_weight_scales_correction_strength_by_confidence(mock_science_config):
+    """Worker-side helper should dampen corrections just above the confidence threshold."""
+    low_conf_adjusted = _rpe_to_weight(
+        predicted_rpe=6.0,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.61,
+    )
+    high_conf_adjusted = _rpe_to_weight(
+        predicted_rpe=6.0,
+        target_rpe=7.75,
+        core_weight_kg=80.0,
+        science=mock_science_config,
+        confidence=0.95,
+    )
+
+    assert low_conf_adjusted > 80.0
+    assert high_conf_adjusted > low_conf_adjusted
 
 
 # ─── Anomaly counter: increments on anomalous prediction ─────────────────────

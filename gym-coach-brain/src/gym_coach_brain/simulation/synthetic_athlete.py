@@ -12,6 +12,7 @@ Signal distributions (per AC 2):
 """
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 
@@ -25,6 +26,93 @@ class SessionSignals:
     post_feeling: int           # 2 / 5 / 9
     workout_minute_offset: int  # -30 to +30 relative to 19:00
     is_deload: bool
+    target_rpe: float           # weekly intensity wave target
+    intensity_label: str        # light / moderate / heavy / deload
+
+
+@dataclass(frozen=True)
+class SimulationScenario:
+    """Profile + mesocycle parameters for a simulation scenario."""
+
+    name: str
+    goal: str
+    experience_level: str
+    training_split: str
+    bodyweight_kg: float
+    available_equipment: tuple[str, ...]
+    initial_weight_coefficients: dict[str, float]
+    weekly_target_rpes: tuple[float, ...]
+    deload_interval: int
+
+
+_SIMULATION_SCENARIOS: dict[str, SimulationScenario] = {
+    "ppl_hypertrophy_gym": SimulationScenario(
+        name="ppl_hypertrophy_gym",
+        goal="hypertrophy",
+        experience_level="intermediate",
+        training_split="ppl",
+        bodyweight_kg=80.0,
+        available_equipment=("barbell", "dumbbell", "cable", "pullup_bar", "dips_bar", "bodyweight"),
+        initial_weight_coefficients={
+            "horizontal_push": 60.0,
+            "vertical_push": 40.0,
+            "horizontal_pull": 50.0,
+            "vertical_pull": 0.0,
+            "squat": 80.0,
+            "hinge": 70.0,
+            "carry": 0.0,
+        },
+        weekly_target_rpes=(7.0, 7.5, 8.0, 6.5),
+        deload_interval=16,
+    ),
+    "upper_lower_strength_gym": SimulationScenario(
+        name="upper_lower_strength_gym",
+        goal="strength",
+        experience_level="advanced",
+        training_split="upper_lower",
+        bodyweight_kg=90.0,
+        available_equipment=("barbell", "dumbbell", "cable", "pullup_bar", "dips_bar", "machine", "bodyweight"),
+        initial_weight_coefficients={
+            "horizontal_push": 85.0,
+            "vertical_push": 55.0,
+            "horizontal_pull": 75.0,
+            "vertical_pull": 10.0,
+            "squat": 115.0,
+            "hinge": 125.0,
+            "carry": 25.0,
+        },
+        weekly_target_rpes=(7.5, 8.0, 8.5, 6.5),
+        deload_interval=20,
+    ),
+    "full_body_beginner_home": SimulationScenario(
+        name="full_body_beginner_home",
+        goal="hypertrophy",
+        experience_level="beginner",
+        training_split="full_body",
+        bodyweight_kg=70.0,
+        available_equipment=("dumbbell", "resistance_band", "pullup_bar", "bodyweight"),
+        initial_weight_coefficients={
+            "horizontal_push": 22.0,
+            "vertical_push": 14.0,
+            "horizontal_pull": 18.0,
+            "vertical_pull": 0.0,
+            "squat": 30.0,
+            "hinge": 26.0,
+            "carry": 0.0,
+        },
+        weekly_target_rpes=(6.5, 7.0, 7.5, 6.0),
+        deload_interval=12,
+    ),
+}
+
+
+def get_simulation_scenario(name: str) -> SimulationScenario:
+    """Return a registered simulation scenario by name."""
+    try:
+        return _SIMULATION_SCENARIOS[name]
+    except KeyError as exc:
+        known = ", ".join(sorted(_SIMULATION_SCENARIOS))
+        raise ValueError(f"Unknown simulation scenario {name!r}. Known: {known}") from exc
 
 
 class SyntheticAthlete:
@@ -35,35 +123,41 @@ class SyntheticAthlete:
     """
 
     BASE_HOUR: int = 19  # Evening base workout hour (19:00)
-    DELOAD_INTERVAL: int = 16  # Sessions between deloads
-
-    def __init__(self, rng: random.Random) -> None:
+    def __init__(
+        self,
+        rng: random.Random,
+        *,
+        scenario: SimulationScenario,
+        sessions_per_week: int,
+    ) -> None:
         self._rng = rng
+        self._scenario = scenario
+        self._sessions_per_week = max(1, sessions_per_week)
 
     @classmethod
-    def create_user_profile_data(cls) -> dict:
-        """Return constructor kwargs for a realistic intermediate UserProfile.
-
-        Uses PPL split with gym equipment for maximum exercise variety.
-        Initial weights reflect a 80 kg intermediate male athlete.
-        """
-        return {
+    def create_user_profile_data(
+        cls,
+        *,
+        scenario_name: str = "ppl_hypertrophy_gym",
+        training_days_per_week: int = 3,
+        overrides: dict | None = None,
+    ) -> dict:
+        """Return constructor kwargs for a configurable athlete profile."""
+        scenario = get_simulation_scenario(scenario_name)
+        profile = {
             "age": 30,
-            "goal": "hypertrophy",
-            "experience_level": "intermediate",
-            "bodyweight_kg": 80.0,
-            "training_split": "ppl",
-            "training_days_per_week": 3,
+            "goal": scenario.goal,
+            "experience_level": scenario.experience_level,
+            "bodyweight_kg": scenario.bodyweight_kg,
+            "training_split": scenario.training_split,
+            "training_days_per_week": max(3, min(6, training_days_per_week)),
             "onboarding_complete": True,
-            "available_equipment": (
-                '["barbell", "dumbbell", "cable", "pullup_bar", "dips_bar", "bodyweight"]'
-            ),
-            "initial_weight_coefficients": (
-                '{"horizontal_push": 60.0, "vertical_push": 40.0, '
-                '"horizontal_pull": 50.0, "vertical_pull": 0.0, '
-                '"squat": 80.0, "hinge": 70.0, "carry": 0.0}'
-            ),
+            "available_equipment": json.dumps(list(scenario.available_equipment)),
+            "initial_weight_coefficients": json.dumps(scenario.initial_weight_coefficients),
         }
+        if overrides:
+            profile.update(overrides)
+        return profile
 
     def generate_session_signals(self, session_index: int) -> SessionSignals:
         """Generate signals for one training session.
@@ -74,6 +168,17 @@ class SyntheticAthlete:
         Returns:
             SessionSignals with sleep, readiness, post-feeling, timing, deload flag.
         """
+        week_index = session_index // self._sessions_per_week
+        target_rpe = self._scenario.weekly_target_rpes[
+            week_index % len(self._scenario.weekly_target_rpes)
+        ]
+        if target_rpe <= 6.5:
+            intensity_label = "light"
+        elif target_rpe >= 8.0:
+            intensity_label = "heavy"
+        else:
+            intensity_label = "moderate"
+
         # ── Sleep: N(7, 1) clamped to [4, 10] ──────────────────────────────
         sleep_hours = self._rng.gauss(7.0, 1.0)
         sleep_hours = max(4.0, min(10.0, sleep_hours))
@@ -100,7 +205,21 @@ class SyntheticAthlete:
 
         # ── Post feeling: mild bias toward 5 (AC 2) ─────────────────────────
         r = self._rng.random()
-        if r < 0.15:
+        if intensity_label == "heavy":
+            if r < 0.25:
+                post_feeling = 2
+            elif r < 0.80:
+                post_feeling = 5
+            else:
+                post_feeling = 9
+        elif intensity_label == "light":
+            if r < 0.10:
+                post_feeling = 2
+            elif r < 0.60:
+                post_feeling = 5
+            else:
+                post_feeling = 9
+        elif r < 0.15:
             post_feeling = 2
         elif r < 0.80:
             post_feeling = 5
@@ -111,7 +230,13 @@ class SyntheticAthlete:
         workout_minute_offset = self._rng.randint(-30, 30)
 
         # ── Deload: every DELOAD_INTERVAL sessions ───────────────────────────
-        is_deload = session_index > 0 and (session_index % self.DELOAD_INTERVAL == 0)
+        is_deload = (
+            session_index > 0
+            and session_index % self._scenario.deload_interval == 0
+        )
+        if is_deload:
+            target_rpe = min(target_rpe, 6.0)
+            intensity_label = "deload"
 
         return SessionSignals(
             sleep_hours=round(sleep_hours, 1),
@@ -119,6 +244,8 @@ class SyntheticAthlete:
             post_feeling=post_feeling,
             workout_minute_offset=workout_minute_offset,
             is_deload=is_deload,
+            target_rpe=target_rpe,
+            intensity_label=intensity_label,
         )
 
     def generate_set_rpe(self, target_rpe: float, session_index: int) -> float:
