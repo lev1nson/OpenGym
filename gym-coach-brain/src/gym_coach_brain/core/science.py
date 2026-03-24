@@ -170,6 +170,81 @@ class EquipmentIncrementsConfig(BaseModel):
     cable: float = Field(default=2.5, gt=0.0)
 
 
+CANONICAL_MUSCLE_GROUP_NAMES = (
+    "chest",
+    "back",
+    "shoulders",
+    "trapezius",
+    "biceps",
+    "triceps",
+    "quadriceps",
+    "hamstrings",
+    "glutes",
+    "calves",
+    "abs",
+    "lower_back",
+)
+
+
+class WeeklyVolumeLandmark(BaseModel):
+    """Weekly volume landmarks for one canonical muscle group.
+
+    Values follow the repo's MV / MEV / MAV / MRV convention:
+    - MV: maintenance volume
+    - MEV: minimum effective volume
+    - MAV: maximum adaptive volume range
+    - MRV: maximum recoverable volume
+    """
+
+    mv: float = Field(ge=0.0)
+    mev: float = Field(ge=0.0)
+    mav_min: float = Field(ge=0.0)
+    mav_max: float = Field(ge=0.0)
+    mrv: float = Field(ge=0.0)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "WeeklyVolumeLandmark":
+        if not self.mv <= self.mev <= self.mav_min <= self.mav_max <= self.mrv:
+            raise ConfigError(
+                "Weekly volume landmarks must satisfy "
+                "mv <= mev <= mav_min <= mav_max <= mrv, "
+                f"got mv={self.mv}, mev={self.mev}, mav_min={self.mav_min}, "
+                f"mav_max={self.mav_max}, mrv={self.mrv}"
+            )
+        return self
+
+    def status_for(self, average_weekly_sets: float) -> str:
+        """Classify average weekly volume against MEV/MRV bounds."""
+        if average_weekly_sets < self.mev:
+            return "below_range"
+        if average_weekly_sets > self.mrv:
+            return "above_range"
+        return "in_range"
+
+
+class WeeklyVolumeLandmarksConfig(BaseModel):
+    """Typed weekly landmarks keyed by canonical seeded muscle names."""
+
+    chest: WeeklyVolumeLandmark
+    back: WeeklyVolumeLandmark
+    shoulders: WeeklyVolumeLandmark
+    trapezius: WeeklyVolumeLandmark
+    biceps: WeeklyVolumeLandmark
+    triceps: WeeklyVolumeLandmark
+    quadriceps: WeeklyVolumeLandmark
+    hamstrings: WeeklyVolumeLandmark
+    glutes: WeeklyVolumeLandmark
+    calves: WeeklyVolumeLandmark
+    abs: WeeklyVolumeLandmark
+    lower_back: WeeklyVolumeLandmark
+
+    def as_dict(self) -> dict[str, WeeklyVolumeLandmark]:
+        return {
+            muscle_name: getattr(self, muscle_name)
+            for muscle_name in CANONICAL_MUSCLE_GROUP_NAMES
+        }
+
+
 class ScienceConfig(BaseModel):
     """Root model for ScienceEvidence.md YAML frontmatter.
 
@@ -188,6 +263,7 @@ class ScienceConfig(BaseModel):
     ml: MLConfig = Field(default_factory=MLConfig)
     plateau_detection_sessions: int = Field(default=3, ge=1)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
+    weekly_volume_landmarks: WeeklyVolumeLandmarksConfig
     initial_weight_table: dict[str, dict[str, float]] = {}
 
 

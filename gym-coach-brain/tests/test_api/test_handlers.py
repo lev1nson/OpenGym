@@ -4,7 +4,7 @@ Uses in-memory DB with taxonomy + exercise seed data.
 No conftest.py — project convention: each test file defines fixtures locally.
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -15,11 +15,13 @@ from gym_coach_brain.api.handlers import (
     handle_onboarding_answer,
     handle_onboarding_complete,
     handle_onboarding_start,
+    handle_volume_report,
     handle_profile_show,
     handle_profile_update_equipment,
     handle_profile_update_split,
     handle_workout_finish,
     handle_workout_log_set,
+    handle_workout_post_checkin,
     handle_workout_recap,
     handle_workout_start,
     handle_workout_status,
@@ -33,6 +35,8 @@ from gym_coach_brain.core.science import (
     ProgressionConfig,
     RecoveryConfig,
     ScienceConfig,
+    WeeklyVolumeLandmark,
+    WeeklyVolumeLandmarksConfig,
 )
 from gym_coach_brain.core.puos import fractional_volume
 from gym_coach_brain.data.models import (
@@ -189,6 +193,21 @@ def onboarding_session():
 @pytest.fixture
 def mock_science():
     """Minimal ScienceConfig with initial_weight_table for deterministic tests."""
+    weekly_volume_landmarks = WeeklyVolumeLandmarksConfig(
+        chest=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=12, mav_max=20, mrv=22),
+        back=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=14, mav_max=22, mrv=25),
+        shoulders=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=22, mrv=26),
+        trapezius=WeeklyVolumeLandmark(mv=0, mev=6, mav_min=10, mav_max=16, mrv=20),
+        biceps=WeeklyVolumeLandmark(mv=5, mev=8, mav_min=14, mav_max=20, mrv=26),
+        triceps=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=18),
+        quadriceps=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=18, mrv=20),
+        hamstrings=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=16, mrv=20),
+        glutes=WeeklyVolumeLandmark(mv=0, mev=0, mav_min=4, mav_max=12, mrv=16),
+        calves=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=16, mrv=20),
+        abs=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=20, mrv=25),
+        lower_back=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=16),
+    )
+
     cfg = ScienceConfig(
         version="test-1.0",
         puos=PUOSConfig(max_sets_per_group=11, smh_volume_multiplier=1.2),
@@ -208,6 +227,7 @@ def mock_science():
             endurance=MethodologySpec(rep_min=15, rep_max=30, frequency_per_week_min=3, frequency_per_week_max=5),
         ),
         planning=PlanningConfig(min_rest_days_per_muscle_group=2, min_rest_days_compound=3),
+        weekly_volume_landmarks=weekly_volume_landmarks,
     )
     cfg.__dict__["initial_weight_table"] = {
         "beginner": {
@@ -583,6 +603,17 @@ def test_workout_status_returns_error_without_active_session(handler_session):
     assert "не найдена" in stdout.lower()
 
 
+def test_workout_status_zero_logged_sets_shows_not_started(handler_session, mock_science):
+    """workout_status with no logged sets shows ⏳ not started for all exercises. [AC 10]"""
+    _create_ready_profile(handler_session)
+    _start_workout(handler_session, mock_science)
+
+    stdout, exit_code = handle_workout_status([], handler_session)
+
+    assert exit_code == 0
+    assert "⏳ not started" in stdout
+
+
 def test_workout_status_shows_progress_and_logged_sets(handler_session, mock_science):
     _create_ready_profile(handler_session)
     workout_session = _start_workout(handler_session, mock_science)
@@ -607,6 +638,26 @@ def test_workout_status_shows_progress_and_logged_sets(handler_session, mock_sci
     assert exit_code == 0
     assert "✅ 1/" in stdout
     assert "set 1" in stdout
+
+
+def test_workout_post_checkin_persists_backend_field(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+    workout_session = _start_workout(handler_session, mock_science)
+    # post_checkin requires a completed session
+    workout_session.status = "completed"
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_post_checkin(
+        ["--session-id", str(workout_session.id), "--post-feeling", "9"],
+        handler_session,
+    )
+
+    assert exit_code == 0
+    handler_session.refresh(workout_session)
+    assert workout_session.post_feeling == 9
+    assert handler_session.info["response_data"]["session_id"] == workout_session.id
+    assert handler_session.info["response_data"]["post_feeling"] == 9
+    assert "saved" in stdout.lower()
 
 
 def test_workout_log_set_validation_duplicate_and_beyond_plan(handler_session, mock_science):
@@ -770,3 +821,117 @@ def test_workout_summary_returns_error_when_history_missing(handler_session, moc
 
     assert exit_code == 1
     assert "пуста" in stdout.lower()
+
+
+def _create_session_with_sets(
+    session: Session,
+    *,
+    status: str,
+    session_date: str,
+    exercise_name: str,
+    set_count: int,
+) -> WorkoutSession:
+    exercise = session.query(Exercise).filter_by(name=exercise_name).one()
+    workout_session = WorkoutSession(
+        session_date=session_date,
+        status=status,
+        planned_exercises="[]",
+    )
+    session.add(workout_session)
+    session.flush()
+
+    for set_number in range(1, set_count + 1):
+        session.add(
+            WorkoutSet(
+                session_id=workout_session.id,
+                exercise_id=exercise.id,
+                set_number=set_number,
+                weight_kg=80.0,
+                reps=8,
+                rir=2,
+                rpe=8.0,
+            )
+        )
+
+    session.flush()
+    return workout_session
+
+
+def test_volume_report(handler_session, mock_science):
+    today = datetime.now(timezone.utc).date()
+    _create_session_with_sets(
+        handler_session,
+        status="completed",
+        session_date=(today - timedelta(days=10)).isoformat(),
+        exercise_name="Bench Press",
+        set_count=4,
+    )
+    _create_session_with_sets(
+        handler_session,
+        status="completed",
+        session_date=(today - timedelta(days=2)).isoformat(),
+        exercise_name="Bench Press",
+        set_count=14,
+    )
+    _create_session_with_sets(
+        handler_session,
+        status="completed",
+        session_date=(today - timedelta(days=20)).isoformat(),
+        exercise_name="Bench Press",
+        set_count=10,
+    )
+    _create_session_with_sets(
+        handler_session,
+        status="active",
+        session_date=(today - timedelta(days=1)).isoformat(),
+        exercise_name="Bench Press",
+        set_count=10,
+    )
+
+    stdout, exit_code = handle_volume_report(["--weeks", "2"], handler_session, mock_science)
+
+    assert exit_code == 0
+    assert "Fractional volume report" in stdout
+    assert "Lookback: 2 weeks" in stdout
+    assert "Completed sessions: 2" in stdout
+    assert "chest | total=18.0 | avg_weekly=9.0 | status=below_range" in stdout
+    assert "science=MV 8 / MEV 10 / MAV 12-20 / MRV 22 | ⚠️" in stdout
+    assert "shoulders | total=9.0 | avg_weekly=4.5 | status=below_range" in stdout
+
+
+@pytest.mark.parametrize("weeks_value", ["0", "-1", "53", "abc"])
+def test_volume_report_rejects_invalid_weeks(handler_session, mock_science, weeks_value):
+    stdout, exit_code = handle_volume_report(["--weeks", weeks_value], handler_session, mock_science)
+
+    assert exit_code == 1
+    assert "--weeks" in stdout
+
+
+def test_volume_report_empty_period_returns_clear_message(handler_session, mock_science):
+    stdout, exit_code = handle_volume_report(["--weeks", "4"], handler_session, mock_science)
+
+    assert exit_code == 0
+    assert "no completed workouts in range" in stdout.lower()
+
+
+def test_volume_report_no_puos_warning_when_no_session_exceeded_limit(
+    handler_session, mock_science
+):
+    """High total volume but each session stays under PUOS limit → no ⚠️ marker."""
+    today = datetime.now(timezone.utc).date()
+    # 3 sessions × 8 sets = 24 total chest sets; 8 < 11 (max_sets_per_group) per session
+    for days_ago in [2, 5, 8]:
+        _create_session_with_sets(
+            handler_session,
+            status="completed",
+            session_date=(today - timedelta(days=days_ago)).isoformat(),
+            exercise_name="Bench Press",
+            set_count=8,
+        )
+
+    stdout, exit_code = handle_volume_report(["--weeks", "2"], handler_session, mock_science)
+
+    assert exit_code == 0
+    chest_lines = [line for line in stdout.splitlines() if line.startswith("chest")]
+    assert len(chest_lines) == 1
+    assert "⚠️" not in chest_lines[0]

@@ -19,7 +19,12 @@ from gym_coach_brain.data.models import (
     MuscleGroup,
     MovementPattern,
 )
-from gym_coach_brain.core.science import ScienceConfig, SummaryConfig
+from gym_coach_brain.core.science import (
+    ScienceConfig,
+    SummaryConfig,
+    WeeklyVolumeLandmark,
+    WeeklyVolumeLandmarksConfig,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -176,6 +181,21 @@ def test_summary_thresholds_from_science_config(db_session):
     _add_set(db_session, sess, ex, 2, rpe=7.5)
 
     # Custom config: lower fatigue threshold → 7.5 >= 6.0 → "Видно что устал"
+    weekly_volume_landmarks = WeeklyVolumeLandmarksConfig(
+        chest=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=12, mav_max=20, mrv=22),
+        back=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=14, mav_max=22, mrv=25),
+        shoulders=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=22, mrv=26),
+        trapezius=WeeklyVolumeLandmark(mv=0, mev=6, mav_min=10, mav_max=16, mrv=20),
+        biceps=WeeklyVolumeLandmark(mv=5, mev=8, mav_min=14, mav_max=20, mrv=26),
+        triceps=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=18),
+        quadriceps=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=18, mrv=20),
+        hamstrings=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=16, mrv=20),
+        glutes=WeeklyVolumeLandmark(mv=0, mev=0, mav_min=4, mav_max=12, mrv=16),
+        calves=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=16, mrv=20),
+        abs=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=20, mrv=25),
+        lower_back=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=16),
+    )
+
     custom_science = ScienceConfig(
         version="test",
         puos=__import__("gym_coach_brain.core.science", fromlist=["PUOSConfig"]).PUOSConfig(
@@ -208,6 +228,7 @@ def test_summary_thresholds_from_science_config(db_session):
             min_rest_days_per_muscle_group=2, min_rest_days_compound=3
         ),
         summary=SummaryConfig(rpe_easy_threshold=7.0, rpe_fatigue_threshold=6.0),
+        weekly_volume_landmarks=weekly_volume_landmarks,
     )
 
     result = generate_summary(sess, db_session, custom_science)

@@ -1,6 +1,6 @@
 # Story 6.2: Fractional volume analytics
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -63,37 +63,37 @@ so that I can verify the system is distributing load correctly across muscle gro
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Extend science configuration for weekly volume landmarks (AC: 4-6)
-  - [ ] Add typed Pydantic models in `gym-coach-brain/src/gym_coach_brain/core/science.py` for per-muscle weekly volume ranges.
-  - [ ] Populate `gym-coach-brain/ScienceEvidence.md` with the canonical landmark data used by the report.
-  - [ ] Keep validation strict enough to prevent missing muscles, inverted ranges, or malformed values.
+- [x] Task 1: Extend science configuration for weekly volume landmarks (AC: 4-6)
+  - [x] Add typed Pydantic models in `gym-coach-brain/src/gym_coach_brain/core/science.py` for per-muscle weekly volume ranges.
+  - [x] Populate `gym-coach-brain/ScienceEvidence.md` with the canonical landmark data used by the report.
+  - [x] Keep validation strict enough to prevent missing muscles, inverted ranges, or malformed values.
 
-- [ ] Task 2: Reuse and minimally extend PUOS/fractional-volume core logic (AC: 2-4, 7)
-  - [ ] Add a narrow helper in `gym-coach-brain/src/gym_coach_brain/core/puos.py` or another clearly justified core location to aggregate fractional volume from historical `WorkoutSet` rows without duplicating coefficient logic.
-  - [ ] Add helper logic for detecting whether any completed session in the lookback window exceeded the effective PUOS limit for a muscle group.
-  - [ ] Keep PUOS overload detection grounded in existing `validate_puos()` semantics instead of inventing a second limit formula.
+- [x] Task 2: Reuse and minimally extend PUOS/fractional-volume core logic (AC: 2-4, 7)
+  - [x] Add a narrow helper in `gym-coach-brain/src/gym_coach_brain/core/puos.py` or another clearly justified core location to aggregate fractional volume from historical `WorkoutSet` rows without duplicating coefficient logic.
+  - [x] Add helper logic for detecting whether any completed session in the lookback window exceeded the effective PUOS limit for a muscle group.
+  - [x] Keep PUOS overload detection grounded in existing `validate_puos()` semantics instead of inventing a second limit formula.
 
-- [ ] Task 3: Implement `handle_volume_report()` in the existing API handler style (AC: 1-3, 6-9)
-  - [ ] Add the handler to `gym-coach-brain/src/gym_coach_brain/api/handlers.py`.
-  - [ ] Parse and validate `--weeks`.
-  - [ ] Query completed sessions in-range, eagerly loading the relationships needed for aggregation.
-  - [ ] Format a deterministic text report with stable ordering and explicit status labels.
+- [x] Task 3: Implement `handle_volume_report()` in the existing API handler style (AC: 1-3, 6-9)
+  - [x] Add the handler to `gym-coach-brain/src/gym_coach_brain/api/handlers.py`.
+  - [x] Parse and validate `--weeks`.
+  - [x] Query completed sessions in-range, eagerly loading the relationships needed for aggregation.
+  - [x] Format a deterministic text report with stable ordering and explicit status labels.
 
-- [ ] Task 4: Wire the intent into the Story 6.1 API boundary without duplicating architecture work (AC: 1, 9)
-  - [ ] If Story 6.1 has already introduced `api/main.py`, register `volume_report` there.
-  - [ ] If Story 6.1 is still not merged in code, add only the minimum `6.2`-specific routing hook needed to keep the implementation aligned with the future `api/main.py` boundary.
-  - [ ] Update any local API contract documentation that enumerates supported intents.
+- [x] Task 4: Wire the intent into the Story 6.1 API boundary without duplicating architecture work (AC: 1, 9)
+  - [x] If Story 6.1 has already introduced `api/main.py`, register `volume_report` there.
+  - [x] If Story 6.1 is still not merged in code, add only the minimum `6.2`-specific routing hook needed to keep the implementation aligned with the future `api/main.py` boundary.
+  - [x] Update any local API contract documentation that enumerates supported intents.
 
-- [ ] Task 5: Add focused automated tests (AC: 10)
-  - [ ] Extend `gym-coach-brain/tests/test_api/test_handlers.py` with a happy-path `test_volume_report`.
-  - [ ] Add validation-path tests for bad `--weeks` values.
-  - [ ] Add a no-history test for the empty-period message.
-  - [ ] Add core/science tests proving landmark config validation and per-session PUOS warning logic.
+- [x] Task 5: Add focused automated tests (AC: 10)
+  - [x] Extend `gym-coach-brain/tests/test_api/test_handlers.py` with a happy-path `test_volume_report`.
+  - [x] Add validation-path tests for bad `--weeks` values.
+  - [x] Add a no-history test for the empty-period message.
+  - [x] Add core/science tests proving landmark config validation and per-session PUOS warning logic.
 
-- [ ] Task 6: Verification (AC: 1-10)
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_api/test_handlers.py -k volume_report`.
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_core/test_puos.py`.
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_core/test_science.py`.
+- [x] Task 6: Verification (AC: 1-10)
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_api/test_handlers.py -k volume_report`.
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_core/test_puos.py`.
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_core/test_science.py`.
 
 ## Dev Notes
 
@@ -310,6 +310,10 @@ GPT-5 Codex
 - Previous story context loaded: `6-1-workout-api-handlers.md`
 - Repo surfaces analyzed: `core/puos.py`, `core/science.py`, `api/handlers.py`, `data/models.py`, `data/seed.py`, tests
 - Latest-technology references checked: official SQLAlchemy and Pydantic documentation
+- Added typed weekly volume landmarks to `ScienceEvidence.md` and `core/science.py`, including strict ordering validation for MV/MEV/MAV/MRV
+- Added `aggregate_historical_volume()` to `core/puos.py` to reuse fractional-volume math and session-level PUOS validation across history
+- Added `handle_volume_report()` plus `volume_report` intent registration in `api/main.py` and documented the API contract in `docs/api-contracts.md`
+- Validation completed with `.venv/bin/pytest` in `gym-coach-brain/`: 444 passed, 1 warning (torch reported missing optional `numpy`)
 
 ### Completion Notes List
 
@@ -317,6 +321,10 @@ GPT-5 Codex
 - Hidden dependency on Story 6.1 API routing was made explicit.
 - ScienceConfig gap for volume landmarks was surfaced as an explicit implementation requirement.
 - Weekly-range comparison and session-based PUOS warning semantics were clarified to prevent incorrect implementations.
+- Implemented typed weekly volume landmarks for all canonical seeded muscle groups and loaded them from `ScienceEvidence.md`.
+- Implemented historical fractional-volume aggregation over completed `WorkoutSet` history with session-level PUOS overload flag reuse via `validate_puos()`.
+- Added deterministic `volume_report` handler output with stable sorting, empty-history handling, and `--weeks` validation.
+- Added focused API/core/science tests plus fixture updates; full `gym-coach-brain` regression suite passed.
 
 ### File List
 
@@ -324,7 +332,16 @@ GPT-5 Codex
 - gym-coach-brain/src/gym_coach_brain/core/science.py
 - gym-coach-brain/src/gym_coach_brain/core/puos.py
 - gym-coach-brain/src/gym_coach_brain/api/handlers.py
+- gym-coach-brain/src/gym_coach_brain/api/main.py
+- gym-coach-brain/tests/conftest.py
 - gym-coach-brain/tests/test_api/test_handlers.py
+- gym-coach-brain/tests/test_api/test_readiness_handler.py
 - gym-coach-brain/tests/test_core/test_puos.py
 - gym-coach-brain/tests/test_core/test_science.py
+- gym-coach-brain/tests/test_adaptation/test_summary.py
 - docs/api-contracts.md
+
+## Change Log
+
+- 2026-03-24: Implemented Story 6.2 fractional volume analytics with typed science landmarks, historical PUOS-aware aggregation, `volume_report` API intent wiring, deterministic text output, and focused regression coverage.
+- 2026-03-24: Code review pass — added DB-level date filter to `handle_volume_report` query (handlers.py:907-913) to avoid loading all completed sessions; added missing negative PUOS warning test `test_volume_report_no_puos_warning_when_no_session_exceeded_limit`. 451 tests passing.

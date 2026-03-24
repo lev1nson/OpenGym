@@ -25,3 +25,6 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# Operator-managed deployment secrets — never commit the real env file
+systemd/gym-coach-brain.env

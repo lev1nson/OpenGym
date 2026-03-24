@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenGym ML Worker Daemon (RPE prediction and fine-tuning)
+Description=OpenGym Telegram Bot Daemon
 Documentation=file:/opt/opengym/gym-coach-brain/README.md
 After=network.target
 
@@ -8,19 +8,17 @@ Type=simple
 User=opengym
 WorkingDirectory=/opt/opengym/gym-coach-brain
 
-ExecStart=/opt/opengym/gym-coach-brain/.venv/bin/python -m gym_coach_brain.ml
+# The bot is the only chat-facing daemon. The backend API is called in-process via execute_intent().
+ExecStart=/opt/opengym/gym-coach-brain/.venv/bin/python -m gym_coach_brain.bot.main
 
 Restart=on-failure
 RestartSec=5s
-
-MemoryMax=8G
-
-# Shared operator-managed runtime configuration for the ML worker and bot.
+MemoryMax=2G
 EnvironmentFile=/opt/opengym/gym-coach-brain/systemd/gym-coach-brain.env
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=gym-coach-brain-ml
+SyslogIdentifier=gym-coach-brain-bot
 
 [Install]
 WantedBy=multi-user.target

@@ -18,6 +18,8 @@ from gym_coach_brain.core.science import (
     ProgressionConfig,
     RecoveryConfig,
     ScienceConfig,
+    WeeklyVolumeLandmark,
+    WeeklyVolumeLandmarksConfig,
 )
 from gym_coach_brain.data.models import Base, ReadinessLog, UserProfile
 from gym_coach_brain.data.seed import seed_all
@@ -49,6 +51,21 @@ def readiness_session_no_profile():
 @pytest.fixture
 def science():
     """Minimal ScienceConfig for readiness tests."""
+    weekly_volume_landmarks = WeeklyVolumeLandmarksConfig(
+        chest=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=12, mav_max=20, mrv=22),
+        back=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=14, mav_max=22, mrv=25),
+        shoulders=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=22, mrv=26),
+        trapezius=WeeklyVolumeLandmark(mv=0, mev=6, mav_min=10, mav_max=16, mrv=20),
+        biceps=WeeklyVolumeLandmark(mv=5, mev=8, mav_min=14, mav_max=20, mrv=26),
+        triceps=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=18),
+        quadriceps=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=18, mrv=20),
+        hamstrings=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=16, mrv=20),
+        glutes=WeeklyVolumeLandmark(mv=0, mev=0, mav_min=4, mav_max=12, mrv=16),
+        calves=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=16, mrv=20),
+        abs=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=20, mrv=25),
+        lower_back=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=16),
+    )
+
     return ScienceConfig(
         version="test-1.0",
         puos=PUOSConfig(max_sets_per_group=11, smh_volume_multiplier=1.2),
@@ -68,6 +85,7 @@ def science():
             endurance=MethodologySpec(rep_min=15, rep_max=30, frequency_per_week_min=3, frequency_per_week_max=5),
         ),
         planning=PlanningConfig(min_rest_days_per_muscle_group=2, min_rest_days_compound=3),
+        weekly_volume_landmarks=weekly_volume_landmarks,
     )
 
 

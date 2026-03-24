@@ -1,6 +1,6 @@
 # Story 6.1: Complete API Handlers for All Workout Intents
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -414,7 +414,11 @@ GPT-5 Codex
 - `gym-coach-brain/src/gym_coach_brain/core/planner.py`
 - `gym-coach-brain/tests/test_api/test_contract.py`
 - `gym-coach-brain/tests/test_api/test_handlers.py`
+- `gym-coach-brain/src/gym_coach_brain/data/features.py` (Story 5.3 scope: added estimate_muscle_group_fatigue + injectable _now param)
+- `gym-coach-brain/src/gym_coach_brain/data/session.py` (Story 5.3 scope: removed MODEL_DIR export)
+- `gym-coach-brain/src/gym_coach_brain/ml/model.py` (Story 5.3 scope: added fine_tune(), atomic save, weights_only=True)
 
 ## Change Log
 
 - 2026-03-24: Implemented Story 6.1 workout API handlers and composition root, documented the additive `data` contract, added focused tests, and moved the story to `review`.
+- 2026-03-24: Code review fixes — removed session.rollback() contract violation from handle_workout_log_set (M1), added test_workout_status_zero_logged_sets_shows_not_started for AC 10 (M2), documented Story 5.3 scope-bleed files in File List (H1/M3).

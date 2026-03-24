@@ -1,6 +1,6 @@
 # Story 6.3: Telegram Bot scaffold — aiogram + BaseChannel + MessageBus
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -66,54 +66,54 @@ so that the bot is decoupled from transport and can be extended with OpenClaw co
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add runtime and test dependencies for the bot scaffold (AC: 2)
-  - [ ] Add `aiogram` to `gym-coach-brain/pyproject.toml`.
-  - [ ] Add `pytest-asyncio` to the dev dependency group.
-  - [ ] Reconcile `requires-python` with the supported `aiogram` range so CI and packaging do not advertise unsupported Python versions.
+- [x] Task 1: Add runtime and test dependencies for the bot scaffold (AC: 2)
+  - [x] Add `aiogram` to `gym-coach-brain/pyproject.toml`.
+  - [x] Add `pytest-asyncio` to the dev dependency group.
+  - [x] Reconcile `requires-python` with the supported `aiogram` range so CI and packaging do not advertise unsupported Python versions.
 
-- [ ] Task 2: Create the bot package skeleton in the correct place (AC: 1, 3-5)
-  - [ ] Create `gym-coach-brain/src/bot/__init__.py`.
-  - [ ] Create `gym-coach-brain/src/bot/channels/base.py`.
-  - [ ] Create `gym-coach-brain/src/bot/channels/telegram.py`.
-  - [ ] Create `gym-coach-brain/src/bot/bus.py`.
-  - [ ] Create `gym-coach-brain/src/bot/state.py`.
-  - [ ] Create `gym-coach-brain/src/bot/main.py`.
+- [x] Task 2: Create the bot package skeleton in the correct place (AC: 1, 3-5)
+  - [x] Create `gym-coach-brain/src/bot/__init__.py`.
+  - [x] Create `gym-coach-brain/src/bot/channels/base.py`.
+  - [x] Create `gym-coach-brain/src/bot/channels/telegram.py`.
+  - [x] Create `gym-coach-brain/src/bot/bus.py`.
+  - [x] Create `gym-coach-brain/src/bot/state.py`.
+  - [x] Create `gym-coach-brain/src/bot/main.py`.
 
-- [ ] Task 3: Define transport-neutral message and button primitives (AC: 3, 8)
-  - [ ] Introduce a minimal internal message type that does not leak aiogram classes across the channel boundary.
-  - [ ] Introduce a minimal button specification that can be rendered as Telegram inline keyboards today and reused by a future `OpenClawChannel`.
-  - [ ] Keep callback payloads deterministic and short.
+- [x] Task 3: Define transport-neutral message and button primitives (AC: 3, 8)
+  - [x] Introduce a minimal internal message type that does not leak aiogram classes across the channel boundary.
+  - [x] Introduce a minimal button specification that can be rendered as Telegram inline keyboards today and reused by a future `OpenClawChannel`.
+  - [x] Keep callback payloads deterministic and short.
 
-- [ ] Task 4: Implement `MessageBus` on top of `asyncio.Queue` (AC: 5)
-  - [ ] Provide separate inbound and outbound queues.
-  - [ ] Keep API names aligned with the Epic: `publish_inbound()`, `consume_inbound()`, `publish_outbound()`, `consume_outbound()`.
-  - [ ] Add graceful shutdown semantics only if they remain simple and testable; do not overdesign the bus in this story.
+- [x] Task 4: Implement `MessageBus` on top of `asyncio.Queue` (AC: 5)
+  - [x] Provide separate inbound and outbound queues.
+  - [x] Keep API names aligned with the Epic: `publish_inbound()`, `consume_inbound()`, `publish_outbound()`, `consume_outbound()`.
+  - [x] Add graceful shutdown semantics only if they remain simple and testable; do not overdesign the bus in this story.
 
-- [ ] Task 5: Implement `TelegramChannel` with aiogram 3 routing and polling hooks (AC: 3-4, 8, 10)
-  - [ ] Register text handlers, callback-query handlers, and `/workout`, `/status`, `/stop`.
-  - [ ] Adapt Telegram updates into the transport-neutral message type.
-  - [ ] Render inline keyboards for deterministic check-ins through the normalized button abstraction.
+- [x] Task 5: Implement `TelegramChannel` with aiogram 3 routing and polling hooks (AC: 3-4, 8, 10)
+  - [x] Register text handlers, callback-query handlers, and `/workout`, `/status`, `/stop`.
+  - [x] Adapt Telegram updates into the transport-neutral message type.
+  - [x] Render inline keyboards for deterministic check-ins through the normalized button abstraction.
 
-- [ ] Task 6: Implement the deterministic pre-workout check-in controller (AC: 6-8, 10)
-  - [ ] `/workout` starts the sleep → readiness button flow.
-  - [ ] Persist the selected sleep bucket across the two-step interaction without globals.
-  - [ ] Call the backend through the Epic 6 API seam after both values are collected.
-  - [ ] Reset pending state and publish the handoff event for future AgentLoop consumption.
+- [x] Task 6: Implement the deterministic pre-workout check-in controller (AC: 6-8, 10)
+  - [x] `/workout` starts the sleep → readiness button flow.
+  - [x] Persist the selected sleep bucket across the two-step interaction without globals.
+  - [x] Call the backend through the Epic 6 API seam after both values are collected.
+  - [x] Reset pending state and publish the handoff event for future AgentLoop consumption.
 
-- [ ] Task 7: Implement the post-workout check-in seam and command-local state resets (AC: 9-10)
-  - [ ] Support `pending_postcheckin=True` with deterministic callback handling.
-  - [ ] Persist `post_feeling` through a backend-facing seam, not direct DB writes from the bot layer.
-  - [ ] Keep `/stop` limited to clearing local transport state.
+- [x] Task 7: Implement the post-workout check-in seam and command-local state resets (AC: 9-10)
+  - [x] Support `pending_postcheckin=True` with deterministic callback handling.
+  - [x] Persist `post_feeling` through a backend-facing seam, not direct DB writes from the bot layer.
+  - [x] Keep `/stop` limited to clearing local transport state.
 
-- [ ] Task 8: Add focused async tests for the bot scaffold (AC: 11)
-  - [ ] Add `gym-coach-brain/tests/test_bot/test_channel.py`.
-  - [ ] Mock the Telegram layer and backend adapter so tests remain local and deterministic.
-  - [ ] Cover sleep check-in, readiness check-in, pending-text ignore behavior, callback routing, and command behavior.
+- [x] Task 8: Add focused async tests for the bot scaffold (AC: 11)
+  - [x] Add `gym-coach-brain/tests/test_bot/test_channel.py`.
+  - [x] Mock the Telegram layer and backend adapter so tests remain local and deterministic.
+  - [x] Cover sleep check-in, readiness check-in, pending-text ignore behavior, callback routing, and command behavior.
 
-- [ ] Task 9: Verification (AC: 1-11)
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_bot/test_channel.py`.
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_api/test_handlers.py`.
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_api/test_readiness_handler.py`.
+- [x] Task 9: Verification (AC: 1-11)
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_bot/test_channel.py`.
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_api/test_handlers.py`.
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_api/test_readiness_handler.py`.
 
 ## Dev Notes
 
@@ -331,25 +331,33 @@ GPT-5 Codex
 
 ### Completion Notes List
 
-- Story converted from the placeholder template into an implementation-ready bot-transport guide.
-- Hidden dependencies on Story 6.1 API entrypoints and on a missing post-check-in backend seam were surfaced explicitly.
-- A critical packaging/runtime mismatch was documented: current project Python range vs current `aiogram` support.
-- The story now makes the transport-neutral abstraction requirement explicit so future `OpenClawChannel` work does not inherit Telegram-specific types.
-- Legacy `router.py` / `gym_coach.py` docs were called out as non-authoritative for this implementation.
+- Added the installable `src/bot/` package with a transport-neutral channel abstraction, typed `asyncio.Queue` message bus, per-user state store, and aiogram 3 router/polling entrypoint.
+- Implemented deterministic `/workout` sleep → readiness orchestration, pending-text blocking, `/status`, `/stop`, and post-workout callback handling without coupling the bot layer to SQLAlchemy.
+- Added a thin `ApiBackendClient` that reuses the structured `gym_coach_brain.api` boundary and introduced the additive `workout_post_checkin` intent for persisting `WorkoutSession.post_feeling`.
+- Kept the 6.3 transport scaffold compatible with the pre-existing `bot.agent` test surface by preserving simple bus/state compatibility shapes while leaving AgentLoop/OpenRouter code out of the 6.3 runtime path.
+- Verification passed for the story-mandated commands and the full package-local suite: `uv run --project gym-coach-brain pytest gym-coach-brain/tests` → `464 passed, 1 warning`.
 
 ### File List
 
 - gym-coach-brain/pyproject.toml
 - gym-coach-brain/src/bot/__init__.py
-- gym-coach-brain/src/bot/channels/base.py
-- gym-coach-brain/src/bot/channels/telegram.py
 - gym-coach-brain/src/bot/bus.py
 - gym-coach-brain/src/bot/state.py
+- gym-coach-brain/src/bot/channels/base.py
+- gym-coach-brain/src/bot/channels/telegram.py
 - gym-coach-brain/src/bot/main.py
-- gym-coach-brain/tests/test_bot/test_channel.py
-- gym-coach-brain/src/gym_coach_brain/api/main.py
-- gym-coach-brain/src/gym_coach_brain/api/__main__.py
 - gym-coach-brain/src/gym_coach_brain/api/handlers.py
+- gym-coach-brain/src/gym_coach_brain/api/main.py
+- gym-coach-brain/tests/test_api/test_handlers.py
+- gym-coach-brain/tests/test_bot/__init__.py
+- gym-coach-brain/tests/test_bot/test_channel.py
+
+### Change Log
+
+- Added aiogram/pytest-asyncio dependencies and constrained the package to Python `>=3.14,<3.15` to match aiogram support.
+- Added the new `bot` transport package with normalized messages/buttons, typed bus/state primitives, aiogram router hooks, and the long-polling entrypoint.
+- Added the narrow `workout_post_checkin` backend API seam plus regression coverage for it.
+- Added focused async Telegram scaffold tests and verified the full `gym-coach-brain/tests` package-local suite.
 
 ### Previous Story Intelligence
 
@@ -408,8 +416,8 @@ GPT-5 Codex
 
 ### Story Completion Status
 
-- Story status set to `ready-for-dev`.
+- Story status set to `review`.
 - Output path: `_bmad-output/implementation-artifacts/6-3-telegram-bot-scaffold.md`
 - Sprint status must be updated to:
   - `epic-6: in-progress`
-  - `6-3-telegram-bot-scaffold: ready-for-dev`
+  - `6-3-telegram-bot-scaffold: review`

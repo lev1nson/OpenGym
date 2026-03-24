@@ -8,6 +8,7 @@ from gym_coach_brain.core.science import (
     PlanningConfig,
     PUOSConfig,
     ScienceConfig,
+    WeeklyVolumeLandmark,
     load_science_config,
 )
 from gym_coach_brain.exceptions import ConfigError
@@ -31,7 +32,7 @@ def test_load_science_config_parses_skeleton(science_config):
 
 
 def test_version_is_production_string(science_config):
-    assert science_config.version == "1.0.0"
+    assert science_config.version == "1.1.0"
 
 
 def test_puos_config_types(science_config):
@@ -122,6 +123,13 @@ def test_equipment_increments_present(science_config):
     assert inc.machine == 5.0
 
 
+def test_weekly_volume_landmarks_present(science_config):
+    chest = science_config.weekly_volume_landmarks.chest
+    assert isinstance(chest, WeeklyVolumeLandmark)
+    assert chest.mev == 10
+    assert science_config.weekly_volume_landmarks.trapezius.mrv == 20
+
+
 def test_load_science_config_accepts_explicit_path():
     """load_science_config accepts explicit Path parameter."""
     config = load_science_config(SCIENCE_PATH)
@@ -135,6 +143,99 @@ def test_load_science_config_missing_file_raises():
     """Missing ScienceEvidence.md raises ConfigError."""
     with pytest.raises(ConfigError, match="not found"):
         load_science_config(Path("/nonexistent/ScienceEvidence.md"))
+
+
+def test_load_science_config_missing_weekly_volume_muscle_raises(tmp_path):
+    bad = tmp_path / "ScienceEvidence.md"
+    bad.write_text(
+        '---\n'
+        'version: "1.0.0"\n'
+        'puos:\n'
+        '  max_sets_per_group: 10\n'
+        '  smh_volume_multiplier: 1.2\n'
+        'progression:\n'
+        '  compound_increment_kg: 2.5\n'
+        '  isolation_increment_kg: 1.25\n'
+        '  apre_6_step_min_kg: 2.5\n'
+        '  apre_6_step_max_kg: 5.0\n'
+        '  hypertrophy_rep_min: 6\n'
+        '  hypertrophy_rep_max: 12\n'
+        'recovery:\n'
+        '  hrv_weight: 0.5\n'
+        '  sleep_weight: 0.3\n'
+        '  stress_weight: 0.2\n'
+        'exercises: {}\n'
+        'methodologies:\n'
+        '  strength: {rep_min: 1, rep_max: 5, frequency_per_week_min: 2, frequency_per_week_max: 4}\n'
+        '  hypertrophy: {rep_min: 6, rep_max: 12, frequency_per_week_min: 2, frequency_per_week_max: 4}\n'
+        '  endurance: {rep_min: 15, rep_max: 30, frequency_per_week_min: 3, frequency_per_week_max: 5}\n'
+        'planning:\n'
+        '  min_rest_days_per_muscle_group: 2\n'
+        '  min_rest_days_compound: 3\n'
+        'weekly_volume_landmarks:\n'
+        '  chest: {mv: 8, mev: 10, mav_min: 12, mav_max: 20, mrv: 22}\n'
+        '  back: {mv: 8, mev: 10, mav_min: 14, mav_max: 22, mrv: 25}\n'
+        '  shoulders: {mv: 0, mev: 8, mav_min: 16, mav_max: 22, mrv: 26}\n'
+        '  trapezius: {mv: 0, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}\n'
+        '  biceps: {mv: 5, mev: 8, mav_min: 14, mav_max: 20, mrv: 26}\n'
+        '  triceps: {mv: 4, mev: 6, mav_min: 10, mav_max: 14, mrv: 18}\n'
+        '  quadriceps: {mv: 6, mev: 8, mav_min: 12, mav_max: 18, mrv: 20}\n'
+        '  hamstrings: {mv: 4, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}\n'
+        '  glutes: {mv: 0, mev: 0, mav_min: 4, mav_max: 12, mrv: 16}\n'
+        '  calves: {mv: 6, mev: 8, mav_min: 12, mav_max: 16, mrv: 20}\n'
+        '  abs: {mv: 0, mev: 8, mav_min: 16, mav_max: 20, mrv: 25}\n'
+        '---\n# body'
+    )
+
+    with pytest.raises(ConfigError, match="failed validation"):
+        load_science_config(bad)
+
+
+def test_load_science_config_rejects_inverted_weekly_volume_landmarks(tmp_path):
+    bad = tmp_path / "ScienceEvidence.md"
+    bad.write_text(
+        '---\n'
+        'version: "1.0.0"\n'
+        'puos:\n'
+        '  max_sets_per_group: 10\n'
+        '  smh_volume_multiplier: 1.2\n'
+        'progression:\n'
+        '  compound_increment_kg: 2.5\n'
+        '  isolation_increment_kg: 1.25\n'
+        '  apre_6_step_min_kg: 2.5\n'
+        '  apre_6_step_max_kg: 5.0\n'
+        '  hypertrophy_rep_min: 6\n'
+        '  hypertrophy_rep_max: 12\n'
+        'recovery:\n'
+        '  hrv_weight: 0.5\n'
+        '  sleep_weight: 0.3\n'
+        '  stress_weight: 0.2\n'
+        'exercises: {}\n'
+        'methodologies:\n'
+        '  strength: {rep_min: 1, rep_max: 5, frequency_per_week_min: 2, frequency_per_week_max: 4}\n'
+        '  hypertrophy: {rep_min: 6, rep_max: 12, frequency_per_week_min: 2, frequency_per_week_max: 4}\n'
+        '  endurance: {rep_min: 15, rep_max: 30, frequency_per_week_min: 3, frequency_per_week_max: 5}\n'
+        'planning:\n'
+        '  min_rest_days_per_muscle_group: 2\n'
+        '  min_rest_days_compound: 3\n'
+        'weekly_volume_landmarks:\n'
+        '  chest: {mv: 8, mev: 10, mav_min: 12, mav_max: 20, mrv: 22}\n'
+        '  back: {mv: 8, mev: 10, mav_min: 14, mav_max: 22, mrv: 25}\n'
+        '  shoulders: {mv: 0, mev: 8, mav_min: 16, mav_max: 22, mrv: 26}\n'
+        '  trapezius: {mv: 0, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}\n'
+        '  biceps: {mv: 5, mev: 8, mav_min: 14, mav_max: 20, mrv: 26}\n'
+        '  triceps: {mv: 4, mev: 6, mav_min: 10, mav_max: 14, mrv: 18}\n'
+        '  quadriceps: {mv: 6, mev: 8, mav_min: 12, mav_max: 18, mrv: 20}\n'
+        '  hamstrings: {mv: 4, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}\n'
+        '  glutes: {mv: 0, mev: 0, mav_min: 4, mav_max: 12, mrv: 16}\n'
+        '  calves: {mv: 6, mev: 8, mav_min: 12, mav_max: 16, mrv: 20}\n'
+        '  abs: {mv: 0, mev: 8, mav_min: 16, mav_max: 20, mrv: 25}\n'
+        '  lower_back: {mv: 4, mev: 6, mav_min: 14, mav_max: 10, mrv: 16}\n'
+        '---\n# body'
+    )
+
+    with pytest.raises(ConfigError, match="failed validation"):
+        load_science_config(bad)
 
 
 def test_load_science_config_no_frontmatter_raises(tmp_path):

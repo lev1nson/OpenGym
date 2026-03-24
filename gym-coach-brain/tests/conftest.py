@@ -22,6 +22,8 @@ from gym_coach_brain.core.science import (
     PlanningConfig,
     MLConfig,
     SummaryConfig,
+    WeeklyVolumeLandmark,
+    WeeklyVolumeLandmarksConfig,
 )
 
 
@@ -66,6 +68,21 @@ def mock_science_config() -> ScienceConfig:
     - max_sets_per_group=11 — PUOS limit from science evidence
     - recovery weights sum to 1.0 (required by model_validator)
     """
+    weekly_volume_landmarks = WeeklyVolumeLandmarksConfig(
+        chest=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=12, mav_max=20, mrv=22),
+        back=WeeklyVolumeLandmark(mv=8, mev=10, mav_min=14, mav_max=22, mrv=25),
+        shoulders=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=22, mrv=26),
+        trapezius=WeeklyVolumeLandmark(mv=0, mev=6, mav_min=10, mav_max=16, mrv=20),
+        biceps=WeeklyVolumeLandmark(mv=5, mev=8, mav_min=14, mav_max=20, mrv=26),
+        triceps=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=18),
+        quadriceps=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=18, mrv=20),
+        hamstrings=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=16, mrv=20),
+        glutes=WeeklyVolumeLandmark(mv=0, mev=0, mav_min=4, mav_max=12, mrv=16),
+        calves=WeeklyVolumeLandmark(mv=6, mev=8, mav_min=12, mav_max=16, mrv=20),
+        abs=WeeklyVolumeLandmark(mv=0, mev=8, mav_min=16, mav_max=20, mrv=25),
+        lower_back=WeeklyVolumeLandmark(mv=4, mev=6, mav_min=10, mav_max=14, mrv=16),
+    )
+
     return ScienceConfig(
         version="test-1.0",
         puos=PUOSConfig(
@@ -118,4 +135,5 @@ def mock_science_config() -> ScienceConfig:
         ),
         plateau_detection_sessions=3,
         summary=SummaryConfig(rpe_easy_threshold=7.0, rpe_fatigue_threshold=8.0),
+        weekly_volume_landmarks=weekly_volume_landmarks,
     )

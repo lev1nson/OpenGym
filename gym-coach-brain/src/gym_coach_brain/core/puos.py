@@ -12,7 +12,9 @@ References:
     Schoenfeld, B.J. & Grgic, J. (2021). Sports, 9(2), 32. PMC7927075.
 """
 import json
+from datetime import date, datetime
 from dataclasses import dataclass, field
+from typing import Mapping, Sequence
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -46,6 +48,15 @@ class FractionalVolume:
     effective_limit: float
     agonist_coeff: float = field(default=AGONIST_COEFF)
     synergist_coeff: float = field(default=SYNERGIST_COEFF)
+
+
+@dataclass
+class HistoricalVolumeSummary:
+    """Aggregated fractional volume across historical completed sessions."""
+
+    total_sets_by_muscle_id: dict[int, float] = field(default_factory=dict)
+    overloaded_muscle_ids: set[int] = field(default_factory=set)
+    included_session_count: int = 0
 
 
 # ─── Existing function (DO NOT MODIFY) ────────────────────────────────────────
@@ -184,3 +195,73 @@ def accumulate_session_volume(
                 volume[secondary_id] = volume.get(secondary_id, 0.0) + SYNERGIST_COEFF
 
     return volume
+
+
+def _parse_session_calendar_date(raw_session_date: str | None) -> date | None:
+    """Parse ISO date/datetime strings into a calendar date."""
+    if not raw_session_date:
+        return None
+
+    normalized = raw_session_date.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(normalized).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(normalized)
+        except ValueError:
+            return None
+
+
+def aggregate_historical_volume(
+    workout_sessions: Sequence[object],
+    muscles_by_id: Mapping[int, MuscleGroup],
+    science: ScienceConfig,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> HistoricalVolumeSummary:
+    """Aggregate fractional volume and PUOS overloads across session history.
+
+    The helper is deterministic and intentionally reuses validate_puos() for
+    overload detection so session-level warning semantics stay aligned with the
+    existing PUOS implementation.
+    """
+    summary = HistoricalVolumeSummary()
+
+    for workout_session in workout_sessions:
+        if getattr(workout_session, "status", None) != "completed":
+            continue
+
+        session_day = _parse_session_calendar_date(
+            getattr(workout_session, "session_date", None)
+        )
+        if session_day is None:
+            continue
+        if start_date is not None and session_day < start_date:
+            continue
+        if end_date is not None and session_day > end_date:
+            continue
+
+        summary.included_session_count += 1
+        session_sets = list(getattr(workout_session, "sets", []))
+        session_volume = accumulate_session_volume(session_sets, science)
+
+        for muscle_group_id, accumulated_sets in session_volume.items():
+            summary.total_sets_by_muscle_id[muscle_group_id] = (
+                summary.total_sets_by_muscle_id.get(muscle_group_id, 0.0)
+                + accumulated_sets
+            )
+
+            muscle_group = muscles_by_id.get(muscle_group_id)
+            if muscle_group is None:
+                continue
+
+            try:
+                validate_puos(muscle_group, accumulated_sets, science)
+            except ScienceLimitError:
+                summary.overloaded_muscle_ids.add(muscle_group_id)
+
+    return summary

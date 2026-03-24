@@ -1,5 +1,5 @@
 ---
-version: "1.0.0"
+version: "1.1.0"
 
 puos:
   max_sets_per_group: 10       # int — PUOS limit: max fractional sets per muscle group per session (Israetel 2018)
@@ -20,6 +20,20 @@ recovery:
   stress_weight: 0.2           # float — stress weight (most subjective; lowest weight)
 
 exercises: {}                  # dict — exercise overrides. Example: {"deadlift": {"smh_eligible": false}}
+
+weekly_volume_landmarks:
+  chest:        {mv: 8, mev: 10, mav_min: 12, mav_max: 20, mrv: 22}
+  back:         {mv: 8, mev: 10, mav_min: 14, mav_max: 22, mrv: 25}
+  shoulders:    {mv: 0, mev: 8, mav_min: 16, mav_max: 22, mrv: 26}
+  trapezius:    {mv: 0, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}
+  biceps:       {mv: 5, mev: 8, mav_min: 14, mav_max: 20, mrv: 26}
+  triceps:      {mv: 4, mev: 6, mav_min: 10, mav_max: 14, mrv: 18}
+  quadriceps:   {mv: 6, mev: 8, mav_min: 12, mav_max: 18, mrv: 20}
+  hamstrings:   {mv: 4, mev: 6, mav_min: 10, mav_max: 16, mrv: 20}
+  glutes:       {mv: 0, mev: 0, mav_min: 4, mav_max: 12, mrv: 16}
+  calves:       {mv: 6, mev: 8, mav_min: 12, mav_max: 16, mrv: 20}
+  abs:          {mv: 0, mev: 8, mav_min: 16, mav_max: 20, mrv: 25}
+  lower_back:   {mv: 4, mev: 6, mav_min: 10, mav_max: 14, mrv: 16}
 
 equipment_increments:
   barbell: 2.5    # float — минимальный шаг барбелла (стандартная блинная пара) [кг]
@@ -109,6 +123,7 @@ Markdown body: human-readable scientific justifications for each parameter.
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 1.1.0 | 2026-03-24 | Added typed weekly volume landmarks for canonical muscle groups and fractional-volume analytics support |
 | 1.0.0 | 2026-03-04 | Initial production coefficients; all fields populated from domain-sports-science-research-2026-03-04.md |
 | 0.0.0 | 2026-03-02 | Skeleton with placeholder values (Story 1.2) |
 
@@ -207,6 +222,27 @@ Where each component is normalized 0.0-1.0 (1.0 = optimal). Volume multiplier: `
 - Specific weights (0.5/0.3/0.2): **EVIDENCE-INFORMED HEURISTIC** — proportions reflect relative objectivity; not derived from a single study
 
 Sources: Kiviniemi, A.M. et al. (2007). *European Journal of Applied Physiology*, 101, 743-751. Plews, D.J. et al. (2013). *Sports Medicine*, 43, 773-781. Buchheit, M. (2014). *Frontiers in Physiology*, 5, 112. PMC11204851.
+
+## Weekly Volume Landmarks
+
+Weekly volume landmarks used by `volume_report`. The report compares average weekly fractional sets against the configured MEV/MRV bounds and exposes the full MV/MEV/MAV/MRV landmarks for transparency.
+
+| Muscle Group | MV | MEV | MAV | MRV |
+|-------------|----|-----|-----|-----|
+| Back | 8 | 10 | 14-22 | 25 |
+| Chest | 8 | 10 | 12-20 | 22 |
+| Quadriceps | 6 | 8 | 12-18 | 20 |
+| Hamstrings | 4 | 6 | 10-16 | 20 |
+| Glutes | 0 | 0 | 4-12 | 16 |
+| Shoulders | 0 | 8 | 16-22 | 26 |
+| Trapezius | 0 | 6 | 10-16 | 20 |
+| Biceps | 5 | 8 | 14-20 | 26 |
+| Triceps | 4 | 6 | 10-14 | 18 |
+| Calves | 6 | 8 | 12-16 | 20 |
+| Abs | 0 | 8 | 16-20 | 25 |
+| Lower Back | 4 | 6 | 10-14 | 16 |
+
+Most landmark values are carried from the project research notes' Israetel-derived table. `trapezius` is an evidence-informed proxy because the repo's canonical taxonomy separates traps from the broader back/shoulder categories used in the legacy source material.
 
 ## Training Methodologies
 

@@ -13,11 +13,11 @@ import argparse
 import json
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from gym_coach_brain.adaptation.recap import generate_recap
 from gym_coach_brain.adaptation.summary import generate_summary
@@ -29,6 +29,7 @@ from gym_coach_brain.core.onboarding import (
     get_available_exercises,
     map_answer_to_coefficients,
 )
+from gym_coach_brain.core.puos import aggregate_historical_volume
 from gym_coach_brain.core.readiness import calculate_recovery_signal
 from gym_coach_brain.core.weight_utils import round_to_equipment_increment
 from gym_coach_brain.data.models import (
@@ -183,6 +184,24 @@ def _active_workout_session(session: Session) -> WorkoutSession | None:
         .order_by(WorkoutSession.id.desc())
         .first()
     )
+
+
+def _parse_iso_calendar_date(raw_value: str | None) -> date | None:
+    """Parse ISO date/datetime strings into a calendar date."""
+    if not raw_value:
+        return None
+
+    normalized = raw_value.strip()
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(normalized).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(normalized)
+        except ValueError:
+            return None
 
 
 def handle_onboarding_start(
@@ -681,6 +700,39 @@ def handle_workout_status(argv: list[str], session: Session) -> tuple[str, int]:
     return "\n".join(lines), 0
 
 
+def handle_workout_post_checkin(argv: list[str], session: Session) -> tuple[str, int]:
+    """Persist the deterministic post-workout feeling value for a session."""
+    parser = argparse.ArgumentParser(prog="workout_post_checkin", add_help=False)
+    parser.add_argument("--session-id", required=True, type=int)
+    parser.add_argument("--post-feeling", required=True, type=int)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return "workout_post_checkin: required --session-id <id> --post-feeling <2|5|9>", 1
+
+    if args.post_feeling not in {2, 5, 9}:
+        return "workout_post_checkin: --post-feeling must be one of 2, 5, 9", 1
+
+    workout_session = session.get(WorkoutSession, args.session_id)
+    if workout_session is None:
+        return f"Тренировка с session_id={args.session_id} не найдена.", 1
+
+    if workout_session.status != "completed":
+        return "post-workout check-in можно сохранить только для завершённой тренировки.", 1
+
+    workout_session.post_feeling = args.post_feeling
+    session.flush()
+    _set_response_data(
+        session,
+        session_id=workout_session.id,
+        post_feeling=args.post_feeling,
+    )
+    return (
+        f"✅ Post-workout feeling saved for session #{workout_session.id}: "
+        f"{args.post_feeling}"
+    ), 0
+
+
 def handle_workout_log_set(
     argv: list[str], session: Session, science: "ScienceConfig"
 ) -> tuple[str, int]:
@@ -746,7 +798,8 @@ def handle_workout_log_set(
     try:
         session.flush()
     except IntegrityError:
-        session.rollback()
+        # Do NOT rollback here — the API boundary (execute_intent) owns session lifecycle.
+        # Returning exit_code=1 signals execute_intent to rollback.
         return "Такой подход уже записан для этого упражнения.", 1
 
     rep_range = planned_exercise.get("rep_range", [])
@@ -827,3 +880,105 @@ def handle_workout_summary(
 
     _set_response_data(session, session_id=workout_session.id)
     return generate_summary(workout_session, session, science), 0
+
+
+def handle_volume_report(
+    argv: list[str], session: Session, science: "ScienceConfig"
+) -> tuple[str, int]:
+    """Return a deterministic historical fractional-volume report."""
+    parser = argparse.ArgumentParser(prog="volume_report", add_help=False)
+    parser.add_argument("--weeks", required=True)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return "volume_report: required --weeks <int between 1 and 52>", 1
+
+    try:
+        weeks = int(args.weeks)
+    except ValueError:
+        return "volume_report: --weeks must be an integer between 1 and 52", 1
+
+    if weeks <= 0 or weeks > 52:
+        return "volume_report: --weeks must be between 1 and 52", 1
+
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=(weeks * 7) - 1)
+
+    completed_sessions = (
+        session.query(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets).selectinload(WorkoutSet.exercise))
+        .filter(WorkoutSession.status == "completed")
+        .filter(WorkoutSession.session_date >= start_date.isoformat())
+        .filter(WorkoutSession.session_date < (end_date + timedelta(days=1)).isoformat())
+        .order_by(WorkoutSession.session_date.desc(), WorkoutSession.id.desc())
+        .all()
+    )
+    muscles = session.query(MuscleGroup).all()
+    muscles_by_id = {muscle.id: muscle for muscle in muscles}
+    muscle_ids_by_name = {muscle.name: muscle.id for muscle in muscles}
+
+    summary = aggregate_historical_volume(
+        completed_sessions,
+        muscles_by_id,
+        science,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    header_lines = [
+        "Fractional volume report",
+        f"Lookback: {weeks} weeks",
+        f"Date span: {start_date.isoformat()} to {end_date.isoformat()}",
+    ]
+
+    if summary.included_session_count == 0 or not summary.total_sets_by_muscle_id:
+        return (
+            "\n".join(
+                [
+                    *header_lines,
+                    "Completed sessions: 0",
+                    "No completed workouts in range.",
+                ]
+            ),
+            0,
+        )
+
+    header_lines.extend(
+        [
+            f"Completed sessions: {summary.included_session_count}",
+            "⚠️ = at least one completed session in this period exceeded the muscle's PUOS session limit.",
+            "",
+        ]
+    )
+
+    rows: list[tuple[float, str, str]] = []
+    for muscle_name, landmarks in science.weekly_volume_landmarks.as_dict().items():
+        muscle_group_id = muscle_ids_by_name.get(muscle_name)
+        total_sets = (
+            summary.total_sets_by_muscle_id.get(muscle_group_id, 0.0)
+            if muscle_group_id is not None
+            else 0.0
+        )
+        average_weekly_sets = total_sets / weeks
+        status = landmarks.status_for(average_weekly_sets)
+        warning = (
+            " | ⚠️"
+            if muscle_group_id is not None
+            and muscle_group_id in summary.overloaded_muscle_ids
+            else ""
+        )
+        rows.append(
+            (
+                total_sets,
+                muscle_name,
+                f"{muscle_name} | total={total_sets:.1f} | avg_weekly={average_weekly_sets:.1f} "
+                f"| status={status} | science=MV {landmarks.mv:g} / MEV {landmarks.mev:g} "
+                f"/ MAV {landmarks.mav_min:g}-{landmarks.mav_max:g} / MRV {landmarks.mrv:g}{warning}",
+            )
+        )
+
+    ordered_rows = [
+        row_text
+        for _, _, row_text in sorted(rows, key=lambda row: (-row[0], row[1]))
+    ]
+    return "\n".join([*header_lines, *ordered_rows]), 0

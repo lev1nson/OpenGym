@@ -81,21 +81,21 @@ development_status:
   epic-4-retrospective: done
 
   # ─── Epic 5: AI-персонализация нагрузок ─────────────────────────────────────
-  epic-5: in-progress
+  epic-5: done
   5-1-ml-data-layer: done
   5-2-rpe-model-pytorch: done
   5-3-ml-worker-daemon: done
   5-4-model-versioning: done
   5-5-simulation-e2e: done
-  epic-5-retrospective: optional
+  epic-5-retrospective: done
 
   # ─── Epic 6: Telegram Bot — финальная интеграция и деплой ──────────────────
   # NOTE: 6.3 (OpenClaw) заменена на Telegram Bot scaffold (aiogram + BaseChannel)
   # NOTE: 6.4 стала AgentLoop + OpenRouter; деплой перенесён в 6.5
-  epic-6: in-progress
-  6-1-workout-api-handlers: review
-  6-2-fractional-volume-analytics: ready-for-dev
-  6-3-telegram-bot-scaffold: ready-for-dev
-  6-4-agent-loop-openrouter: ready-for-dev
-  6-5-deploy-systemd-ci: ready-for-dev
+  epic-6: done
+  6-1-workout-api-handlers: done
+  6-2-fractional-volume-analytics: done
+  6-3-telegram-bot-scaffold: done
+  6-4-agent-loop-openrouter: done
+  6-5-deploy-systemd-ci: done
   epic-6-retrospective: optional

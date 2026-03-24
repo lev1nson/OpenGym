@@ -430,6 +430,7 @@ python3 router.py --text "<natural language>" [--dry-run] [--json]
 ```bash
 python -m gym_coach_brain.api --intent workout_status
 python -m gym_coach_brain.api --intent workout_start --sleep-hours 7.5 --pre-readiness 5
+python -m gym_coach_brain.api --intent volume_report --weeks 4
 ```
 
 The stable top-level JSON keys for subprocess callers are:
@@ -452,6 +453,18 @@ Story 6.1 adds an optional additive `data` object for structured flags and ident
     "session_id": 12
   }
 }
+```
+
+`volume_report` is a text-first analytics intent. It keeps the same JSON envelope but returns a deterministic multi-line report in `stdout`, for example:
+
+```text
+Fractional volume report
+Lookback: 4 weeks
+Date span: 2026-02-26 to 2026-03-24
+Completed sessions: 6
+⚠️ = at least one completed session in this period exceeded the muscle's PUOS session limit.
+
+chest | total=18.0 | avg_weekly=4.5 | status=below_range | science=MV 8 / MEV 10 / MAV 12-20 / MRV 22
 ```
 
 **Needs clarification:**

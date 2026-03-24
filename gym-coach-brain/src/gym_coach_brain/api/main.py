@@ -11,12 +11,14 @@ from gym_coach_brain.api.handlers import (
     handle_onboarding_answer,
     handle_onboarding_complete,
     handle_onboarding_start,
+    handle_volume_report,
     handle_profile_show,
     handle_profile_update_equipment,
     handle_profile_update_split,
     handle_readiness_log,
     handle_workout_finish,
     handle_workout_log_set,
+    handle_workout_post_checkin,
     handle_workout_recap,
     handle_workout_start,
     handle_workout_status,
@@ -40,10 +42,12 @@ _HANDLERS: dict[str, tuple[Callable[..., tuple[str, int]], bool]] = {
     "readiness_log": (handle_readiness_log, True),
     "workout_start": (handle_workout_start, True),
     "workout_status": (handle_workout_status, False),
+    "workout_post_checkin": (handle_workout_post_checkin, False),
     "workout_log_set": (handle_workout_log_set, True),
     "workout_finish": (handle_workout_finish, True),
     "workout_recap": (handle_workout_recap, False),
     "workout_summary": (handle_workout_summary, True),
+    "volume_report": (handle_volume_report, True),
 }
 
 

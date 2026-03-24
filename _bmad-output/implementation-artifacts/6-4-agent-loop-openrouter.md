@@ -1,6 +1,6 @@
 # Story 6.4: AgentLoop - LLM Agent + OpenRouter + Tool Calling
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -114,40 +114,40 @@ so that the athlete can have natural-language conversations with a personal trai
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create the AgentLoop surface and internal message model (AC: 1, 4, 11, 12)
-  - [ ] Add `gym-coach-brain/src/bot/agent.py` with `AgentLoop`.
-  - [ ] Define the loop boundary around inbound bus messages, outbound replies, internal history, and max-iteration handling.
-  - [ ] Keep internal state compact and serializable enough for tests.
+- [x] Task 1: Create the AgentLoop surface and internal message model (AC: 1, 4, 11, 12)
+  - [x] Add `gym-coach-brain/src/bot/agent.py` with `AgentLoop`.
+  - [x] Define the loop boundary around inbound bus messages, outbound replies, internal history, and max-iteration handling.
+  - [x] Keep internal state compact and serializable enough for tests.
 
-- [ ] Task 2: Add the OpenRouter client path using current documented integration guidance (AC: 4-6, 13)
-  - [ ] Add the minimal dependency/runtime path needed to call OpenRouter through the documented OpenAI-compatible interface.
-  - [ ] Keep API key/model lookup in env-driven configuration, not scattered across handlers.
-  - [ ] Add timeouts and defensive error handling for request failures.
+- [x] Task 2: Add the OpenRouter client path using current documented integration guidance (AC: 4-6, 13)
+  - [x] Add the minimal dependency/runtime path needed to call OpenRouter through the documented OpenAI-compatible interface.
+  - [x] Keep API key/model lookup in env-driven configuration, not scattered across handlers.
+  - [x] Add timeouts and defensive error handling for request failures.
 
-- [ ] Task 3: Add prompt and tool-definition infrastructure (AC: 6-7, 11-12)
-  - [ ] Create `gym-coach-brain/src/bot/prompts/system.md`.
-  - [ ] Define the seven tool schemas in code close to `AgentLoop` or in a narrow helper module.
-  - [ ] Make sure schemas match the current backend CLI argument names and repo terminology.
+- [x] Task 3: Add prompt and tool-definition infrastructure (AC: 6-7, 11-12)
+  - [x] Create `gym-coach-brain/src/bot/prompts/system.md`.
+  - [x] Define the seven tool schemas in code close to `AgentLoop` or in a narrow helper module.
+  - [x] Make sure schemas match the current backend CLI argument names and repo terminology.
 
-- [ ] Task 4: Implement subprocess-backed tool execution (AC: 3, 8-10)
-  - [ ] Build a small execution helper that maps tool arguments to `python -m gym_coach_brain.api --intent ...`.
-  - [ ] Parse stdout as JSON envelope and normalize failures into a single internal result shape.
-  - [ ] Handle malformed JSON, missing fields, non-zero return codes, and timeouts cleanly.
+- [x] Task 4: Implement subprocess-backed tool execution (AC: 3, 8-10)
+  - [x] Build a small execution helper that maps tool arguments to `python -m gym_coach_brain.api --intent ...`.
+  - [x] Parse stdout as JSON envelope and normalize failures into a single internal result shape.
+  - [x] Handle malformed JSON, missing fields, non-zero return codes, and timeouts cleanly.
 
-- [ ] Task 5: Integrate `UserState` and internal workout context (AC: 1, 9, 11-12)
-  - [ ] Translate `bot/state.py` data into a compact model-facing context block.
-  - [ ] Preserve internal knowledge of `exercise_id` / active session metadata without exposing it in outbound chat text.
-  - [ ] Keep the free-chat agent loop compatible with the deterministic check-in flow from Story 6.3.
+- [x] Task 5: Integrate `UserState` and internal workout context (AC: 1, 9, 11-12)
+  - [x] Translate `bot/state.py` data into a compact model-facing context block.
+  - [x] Preserve internal knowledge of `exercise_id` / active session metadata without exposing it in outbound chat text.
+  - [x] Keep the free-chat agent loop compatible with the deterministic check-in flow from Story 6.3.
 
-- [ ] Task 6: Add test coverage for the new bot package (AC: 14-15)
-  - [ ] Create `gym-coach-brain/tests/test_bot/test_agent.py`.
-  - [ ] Create `gym-coach-brain/tests/test_bot/test_e2e.py`.
-  - [ ] Use mocks/fakes for OpenRouter responses, subprocess calls, and bus/channel plumbing.
+- [x] Task 6: Add test coverage for the new bot package (AC: 14-15)
+  - [x] Create `gym-coach-brain/tests/test_bot/test_agent.py`.
+  - [x] Create `gym-coach-brain/tests/test_bot/test_e2e.py`.
+  - [x] Use mocks/fakes for OpenRouter responses, subprocess calls, and bus/channel plumbing.
 
-- [ ] Task 7: Verification (AC: 1-15)
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_bot/test_agent.py`.
-  - [ ] Run `uv run pytest gym-coach-brain/tests/test_bot/test_e2e.py`.
-  - [ ] Run at least one CLI smoke test against `python -m gym_coach_brain.api` with mocked subprocess integration where practical.
+- [x] Task 7: Verification (AC: 1-15)
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_bot/test_agent.py`.
+  - [x] Run `uv run pytest gym-coach-brain/tests/test_bot/test_e2e.py`.
+  - [x] Run at least one CLI smoke test against `python -m gym_coach_brain.api` with mocked subprocess integration where practical.
 
 ## Dev Notes
 
@@ -386,19 +386,51 @@ GPT-5 Codex
 ### Debug Log References
 
 - Story selection: explicit user request for `6-4`
-- Planning artifacts loaded: Epic 6, PRD, Architecture, Project Context
-- Previous epic context checked: `6-1-workout-api-handlers.md`, `6-3-telegram-bot-scaffold.md`
-- Current repo surfaces checked: `pyproject.toml`, `api/main.py`, `api/contract.py`, `api/handlers.py`, `data/models.py`, `src/` package layout, current git status
-- Latest technology references checked: aiogram PyPI/docs, OpenRouter quickstart/API/tool-calling docs, OpenRouter Python SDK docs, OpenAI SDK PyPI, Python 3.14 subprocess docs
+- Workflow files loaded: `_bmad/core/tasks/workflow.xml`, `_bmad/bmm/workflows/4-implementation/dev-story/workflow.yaml`, `instructions.xml`, `checklist.md`
+- Story context loaded: `6-4-agent-loop-openrouter.md`, `_bmad-output/project-context.md`, `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- Existing bot transport surfaces reconciled with Story 6.4: `src/bot/channels/base.py`, `src/bot/channels/telegram.py`, `src/bot/main.py`, `tests/test_bot/test_channel.py`
+- Backend/API surfaces checked: `pyproject.toml`, `src/gym_coach_brain/api/main.py`, `src/gym_coach_brain/api/contract.py`, `src/gym_coach_brain/api/handlers.py`, `src/gym_coach_brain/data/models.py`, `src/gym_coach_brain/data/session.py`
+- Official integration references verified during implementation: OpenRouter OpenAI SDK compatibility docs, OpenRouter tool-calling docs, OpenAI Python SDK docs
+- Validation runs completed:
+  - `uv run pytest tests/test_bot/test_agent.py`
+  - `uv run pytest tests/test_bot/test_e2e.py`
+  - `uv run pytest tests/test_bot`
+  - `uv run pytest`
+  - CLI smoke: `python -m gym_coach_brain.api --intent workout_status` against temporary SQLite schema
+
+### Implementation Plan
+
+- Extend the existing `bot` package instead of creating a parallel orchestration surface, so Story 6.4 stays compatible with the 6.3 transport/controller layer.
+- Add a narrow `OpenRouterClient` around the OpenAI-compatible chat-completions API and keep the runtime fully env-driven through `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`.
+- Keep tool execution behind `python -m gym_coach_brain.api --intent ...`, with strict argv mapping, JSON envelope validation, timeout handling, and user-safe fallbacks.
+- Use a bounded agent loop with tool-call replay, compact `UserState` summaries, internal exercise-id capture, and response sanitization before anything reaches the athlete.
 
 ### Completion Notes List
 
-- Story converted from template to an implementation-ready context document.
-- Explicit package-path guidance was added for `src/bot/` vs `src/gym_coach_brain/`.
-- Current backend contract mismatches were surfaced, especially around `readiness_log`.
-- Latest OpenRouter integration guidance was incorporated with concrete dependency advice.
-- Bot testing scope was expanded so the dev agent has clear unit and E2E targets.
+- Implemented `AgentLoop` with bounded iteration, prompt loading from file, compact state/context injection, tool-call replay, and athlete-safe fallback behavior.
+- Added OpenRouter support through the documented OpenAI-compatible client path with `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, default model `openai/gpt-4o`, and request timeout support.
+- Added explicit tool schemas and subprocess-backed execution for `workout_start`, `workout_log_set`, `workout_finish`, `workout_status`, `workout_summary`, `readiness_log`, and `volume_report`.
+- Preserved Story 6.3 compatibility by extending the existing `bot.bus` and `bot.state` interfaces instead of replacing them; deterministic handoff events now normalize cleanly into the conversational loop.
+- Added internal exercise-id capture from backend tool output and response sanitization so numeric ids and raw envelopes stay hidden from athlete-facing chat.
+- Added isolated bot unit/E2E coverage and verified the entire `gym-coach-brain` suite: `465 passed` after code review fixes.
+- Verified CLI boundary behavior with a temporary SQLite schema; `python -m gym_coach_brain.api --intent workout_status` returned the expected JSON envelope with `exit_code=1` and `stdout="Активная тренировка не найдена."`.
 
 ### File List
 
 - _bmad-output/implementation-artifacts/6-4-agent-loop-openrouter.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- gym-coach-brain/pyproject.toml
+- gym-coach-brain/src/gym_coach_brain/bot/agent.py
+- gym-coach-brain/src/gym_coach_brain/bot/bus.py
+- gym-coach-brain/src/gym_coach_brain/bot/openrouter_client.py
+- gym-coach-brain/src/gym_coach_brain/bot/prompts/system.md
+- gym-coach-brain/src/gym_coach_brain/bot/state.py
+- gym-coach-brain/src/gym_coach_brain/bot/tools.py
+- gym-coach-brain/tests/test_bot/__init__.py
+- gym-coach-brain/tests/test_bot/test_agent.py
+- gym-coach-brain/tests/test_bot/test_e2e.py
+
+## Change Log
+
+- 2026-03-24: Implemented Story 6.4 AgentLoop orchestration, OpenRouter client wrapper, tool schemas/executor, state+bus compatibility updates, bot tests, full regression validation, and CLI smoke verification.
+- 2026-03-24: Code review fixes — switched OpenRouterClient to AsyncOpenAI (non-blocking event loop), added direct exit_code=2 fallback in AgentLoop (AC 10 compliance), added InboundEvent E2E test coverage (AC 15), added tests/test_bot/__init__.py, added asyncio_mode+pythonpath to pyproject.toml, fixed bus.py InboundMessage/OutboundMessage dataclasses, restored missing openai dependency. 465 passed.

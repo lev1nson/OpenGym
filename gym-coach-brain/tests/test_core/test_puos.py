@@ -1,4 +1,5 @@
 """Tests for core/puos.py — PUOS validator and fractional volume accumulation."""
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,7 +11,9 @@ from gym_coach_brain.core.puos import (
     PUOS_WARNING_THRESHOLD,
     SYNERGIST_COEFF,
     FractionalVolume,
+    HistoricalVolumeSummary,
     accumulate_session_volume,
+    aggregate_historical_volume,
     fractional_volume,
     validate_puos,
 )
@@ -45,6 +48,15 @@ def make_exercise(
 def make_workout_set(exercise: SimpleNamespace) -> SimpleNamespace:
     """Create a simple object mimicking WorkoutSet with pre-loaded exercise."""
     return SimpleNamespace(exercise=exercise)
+
+
+def make_workout_session(
+    session_date: str,
+    status: str,
+    exercise_sets: list[SimpleNamespace],
+) -> SimpleNamespace:
+    """Create a simple object mimicking WorkoutSession with historical sets."""
+    return SimpleNamespace(session_date=session_date, status=status, sets=exercise_sets)
 
 
 # ─── validate_puos: basic cases ───────────────────────────────────────────────
@@ -245,6 +257,48 @@ def test_puos_validate_within_limit_on_accumulated_volume(mock_science_config):
 
     result = validate_puos(muscle, volume[chest_id], mock_science_config)
     assert result.accumulated_sets == pytest.approx(11.0)
+
+
+def test_aggregate_historical_volume_filters_period_and_flags_overloads(
+    mock_science_config,
+):
+    chest = make_muscle_group(1, "chest", stretch_mediated=False)
+    muscles_by_id = {1: chest}
+    bench = make_exercise(1, primary_muscle_id=1)
+
+    in_range = make_workout_session(
+        "2026-03-20",
+        "completed",
+        [make_workout_set(bench) for _ in range(2)],
+    )
+    overload = make_workout_session(
+        "2026-03-23",
+        "completed",
+        [make_workout_set(bench) for _ in range(12)],
+    )
+    old = make_workout_session(
+        "2026-02-20",
+        "completed",
+        [make_workout_set(bench) for _ in range(5)],
+    )
+    active = make_workout_session(
+        "2026-03-22",
+        "active",
+        [make_workout_set(bench) for _ in range(7)],
+    )
+
+    result = aggregate_historical_volume(
+        [in_range, overload, old, active],
+        muscles_by_id,
+        mock_science_config,
+        start_date=date(2026, 3, 10),
+        end_date=date(2026, 3, 24),
+    )
+
+    assert isinstance(result, HistoricalVolumeSummary)
+    assert result.included_session_count == 2
+    assert result.total_sets_by_muscle_id[1] == pytest.approx(14.0)
+    assert result.overloaded_muscle_ids == {1}
 
 
 # ─── Legacy: fractional_volume (DB-backed) ─────────────────────────────────────
