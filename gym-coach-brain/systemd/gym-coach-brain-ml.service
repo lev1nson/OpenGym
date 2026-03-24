@@ -1,0 +1,39 @@
+[Unit]
+Description=OpenGym ML Worker Daemon (RPE prediction and fine-tuning)
+Documentation=https://github.com/your-org/opengym
+After=network.target
+
+[Service]
+Type=simple
+# Replace with the actual deployment user and working directory
+User=opengym
+WorkingDirectory=/opt/opengym/gym-coach-brain
+
+# Activate the uv-managed virtual environment before running
+ExecStart=/opt/opengym/gym-coach-brain/.venv/bin/python -m gym_coach_brain.ml
+
+# Restart on failure (crash recovery); prevents manual restart on SIGTERM/SIGKILL
+Restart=on-failure
+RestartSec=5s
+
+# Memory cap: MemoryMax is the current directive per systemd resource control docs
+# (MemoryLimit is the legacy equivalent, retained for compatibility in older systemd).
+# 8 GB hard cap prevents PyTorch OOM from taking down the host.
+MemoryMax=8G
+
+# Pass operational configuration via environment
+Environment=DATABASE_URL=sqlite:////opt/opengym/gym-coach-brain/gym_coach.sqlite
+Environment=MODEL_DIR=/opt/opengym/model_weights
+Environment=ML_POLL_INTERVAL=60
+Environment=ML_FINE_TUNE_THRESHOLD=5
+
+# Optional: load secrets / overrides from a separate env file
+# EnvironmentFile=/opt/opengym/ml-worker.env
+
+# Structured logs go to the journal; use `journalctl -u gym-coach-brain-ml` to tail
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gym-coach-brain-ml
+
+[Install]
+WantedBy=multi-user.target

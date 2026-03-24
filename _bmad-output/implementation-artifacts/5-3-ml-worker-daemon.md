@@ -1,6 +1,6 @@
 # Story 5.3: ML Worker daemon - polling loop and systemd
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -42,45 +42,45 @@ So that PyTorch failures never crash the main API and memory is bounded.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create the worker runtime skeleton (AC: 1, 11, 12)
-  - [ ] Add `gym-coach-brain/src/gym_coach_brain/ml/worker.py` with `MLWorker` constructor, polling entrypoint, and explicit dependency injection for engine, model, science config, and logger.
-  - [ ] Add `gym-coach-brain/src/gym_coach_brain/ml/__main__.py` so `python -m gym_coach_brain.ml` starts the daemon.
-  - [ ] Create `gym-coach-brain/systemd/gym-coach-brain-ml.service` and the missing `systemd/` directory in the package root.
+- [x] Task 1: Create the worker runtime skeleton (AC: 1, 11, 12)
+  - [x] Add `gym-coach-brain/src/gym_coach_brain/ml/worker.py` with `MLWorker` constructor, polling entrypoint, and explicit dependency injection for engine, model, science config, and logger.
+  - [x] Add `gym-coach-brain/src/gym_coach_brain/ml/__main__.py` so `python -m gym_coach_brain.ml` starts the daemon.
+  - [x] Create `gym-coach-brain/systemd/gym-coach-brain-ml.service` and the missing `systemd/` directory in the package root.
 
-- [ ] Task 2: Implement queue polling and job lifecycle guards (AC: 1, 2, 4, 5, 6, 7)
-  - [ ] Reuse `data.queue.get_pending_jobs()` for priority ordering instead of reimplementing SQL in the worker.
-  - [ ] Mark jobs `processing` before execution and mark terminal states with `update_job_status()`.
-  - [ ] Treat unexpected `processing` rows as incidents to log, not as jobs to mutate back into `pending`.
+- [x] Task 2: Implement queue polling and job lifecycle guards (AC: 1, 2, 4, 5, 6, 7)
+  - [x] Reuse `data.queue.get_pending_jobs()` for priority ordering instead of reimplementing SQL in the worker.
+  - [x] Mark jobs `processing` before execution and mark terminal states with `update_job_status()`.
+  - [x] Treat unexpected `processing` rows as incidents to log, not as jobs to mutate back into `pending`.
 
-- [ ] Task 3: Implement `PREDICT` job execution (AC: 2, 4, 7, 10)
-  - [ ] Parse the queued workout session and planned exercises from `WorkoutSession.planned_exercises`.
-  - [ ] Build one canonical feature payload per `(session_id, exercise_id)` through `data.features.build_feature_vector(...)` plus `muscle_group_fatigue_estimate`.
-  - [ ] Call `RPEModel.predict(...)` and persist `RPEPrediction` rows that match the contract already consumed by `adaptation/engine.py`.
+- [x] Task 3: Implement `PREDICT` job execution (AC: 2, 4, 7, 10)
+  - [x] Parse the queued workout session and planned exercises from `WorkoutSession.planned_exercises`.
+  - [x] Build one canonical feature payload per `(session_id, exercise_id)` through `data.features.build_feature_vector(...)` plus `muscle_group_fatigue_estimate`.
+  - [x] Call `RPEModel.predict(...)` and persist `RPEPrediction` rows that match the contract already consumed by `adaptation/engine.py`.
 
-- [ ] Task 4: Implement `FINE_TUNE` job threshold logic and dispatch (AC: 2, 3, 4, 7)
-  - [ ] Count eligible sessions from the DB using the same `post_feeling IS NOT NULL` and `is_deload=False` rules already established in `data.queue.enqueue_fine_tune()`.
-  - [ ] Skip training when the threshold is not met, leaving a clear log trail instead of failing silently.
-  - [ ] Keep `PREDICT` dispatch latency ahead of `FINE_TUNE` work even when both job types are pending.
+- [x] Task 4: Implement `FINE_TUNE` job threshold logic and dispatch (AC: 2, 3, 4, 7)
+  - [x] Count eligible sessions from the DB using the same `post_feeling IS NOT NULL` and `is_deload=False` rules already established in `data.queue.enqueue_fine_tune()`.
+  - [x] Skip training when the threshold is not met, leaving a clear log trail instead of failing silently.
+  - [x] Keep `PREDICT` dispatch latency ahead of `FINE_TUNE` work even when both job types are pending.
 
-- [ ] Task 5: Add anomaly tracking and rollback hooks (AC: 8, 9, 10)
-  - [ ] Increment or reset the in-memory anomaly counter based on persisted prediction state, not on pre-write assumptions.
-  - [ ] Add rollback helper(s) in `worker.py` that target `MODEL_DIR/model_v{n}.pt` naming, while keeping full versioning expansion for Story 5.4.
-  - [ ] Log rollback attempts, missing prior versions, and non-blocking continuation paths with structured context.
+- [x] Task 5: Add anomaly tracking and rollback hooks (AC: 8, 9, 10)
+  - [x] Increment or reset the in-memory anomaly counter based on persisted prediction state, not on pre-write assumptions.
+  - [x] Add rollback helper(s) in `worker.py` that target `MODEL_DIR/model_v{n}.pt` naming, while keeping full versioning expansion for Story 5.4.
+  - [x] Log rollback attempts, missing prior versions, and non-blocking continuation paths with structured context.
 
-- [ ] Task 6: Add operational configuration and structured logging (AC: 1, 4, 6, 7, 11)
-  - [ ] Read polling interval, fine-tune threshold, and model directory from config/env without hardcoding operational values beyond story defaults.
-  - [ ] Use `loguru` structured binds for per-job logs.
-  - [ ] Keep the worker resilient: one bad job must not terminate the daemon process.
+- [x] Task 6: Add operational configuration and structured logging (AC: 1, 4, 6, 7, 11)
+  - [x] Read polling interval, fine-tune threshold, and model directory from config/env without hardcoding operational values beyond story defaults.
+  - [x] Use `loguru` structured binds for per-job logs.
+  - [x] Keep the worker resilient: one bad job must not terminate the daemon process.
 
-- [ ] Task 7: Cover the worker with tests (AC: 12, 13)
-  - [ ] Add `gym-coach-brain/tests/test_ml/test_worker.py` using in-memory SQLite and a mock RPE model.
-  - [ ] Assert queue priority, lifecycle status transitions, threshold behavior, anomaly rollback trigger, and counter reset semantics.
-  - [ ] Prove the test module does not require importing real PyTorch to exercise worker orchestration.
+- [x] Task 7: Cover the worker with tests (AC: 12, 13)
+  - [x] Add `gym-coach-brain/tests/test_ml/test_worker.py` using in-memory SQLite and a mock RPE model.
+  - [x] Assert queue priority, lifecycle status transitions, threshold behavior, anomaly rollback trigger, and counter reset semantics.
+  - [x] Prove the test module does not require importing real PyTorch to exercise worker orchestration.
 
-- [ ] Task 8: Final verification (AC: 1-13)
-  - [ ] Run `uv run pytest tests/test_ml/test_worker.py`.
-  - [ ] Run `uv run pytest` to ensure worker changes do not regress queue, adaptation, or API behavior.
-  - [ ] Smoke-check the daemon entrypoint with `uv run python -m gym_coach_brain.ml --help` or the implemented equivalent if the module exposes CLI arguments.
+- [x] Task 8: Final verification (AC: 1-13)
+  - [x] Run `uv run pytest tests/test_ml/test_worker.py` → 21/21 passed.
+  - [x] Run `uv run pytest` → 388/388 passed, 0 regressions.
+  - [x] Smoke-check the daemon entrypoint: `python -c "import gym_coach_brain.ml.__main__"` → OK.
 
 ## Dev Notes
 
@@ -255,18 +255,30 @@ claude-sonnet-4-6 (create-story)
 - 2026-03-09: Story 5.3 created via the BMAD create-story workflow in automated mode.
 - 2026-03-09: Story context includes queue invariants, current worker gaps, prior-story learnings, current official systemd/PyTorch guidance, and a narrowed file-touch plan.
 - 2026-03-09: Validation workflow file `_bmad/core/tasks/validate-workflow.xml` was not present in this repo, so checklist validation must be performed manually against `_bmad/bmm/workflows/4-implementation/create-story/checklist.md`.
+- 2026-03-09: Code review fixes landed: stuck `processing` jobs now log operational incidents, low-confidence predictions no longer count as anomalies, invalid `PREDICT` jobs fail instead of reporting false success, and worker bootstrap now restores the latest checkpoint version.
 
 ### File List
 
-- `gym-coach-brain/src/gym_coach_brain/ml/worker.py`
-- `gym-coach-brain/src/gym_coach_brain/ml/__main__.py`
-- `gym-coach-brain/systemd/gym-coach-brain-ml.service`
-- `gym-coach-brain/tests/test_ml/test_worker.py`
-- `gym-coach-brain/src/gym_coach_brain/data/queue.py` (only if canonical queue helpers need extension)
-- `gym-coach-brain/src/gym_coach_brain/ml/constants.py` (only if worker defaults need shared constants)
+- `gym-coach-brain/src/gym_coach_brain/ml/worker.py` (new)
+- `gym-coach-brain/src/gym_coach_brain/ml/__main__.py` (new)
+- `gym-coach-brain/systemd/gym-coach-brain-ml.service` (new)
+- `gym-coach-brain/tests/test_ml/test_worker.py` (new)
+- `gym-coach-brain/src/gym_coach_brain/data/features.py` (added `estimate_muscle_group_fatigue` public function)
+- `gym-coach-brain/src/gym_coach_brain/ml/model.py` (added `fine_tune()` method; updated `load()` to use `weights_only=True`)
 
 ### Story Completion Status
 
-- Story status set to `ready-for-dev`.
-- Sprint status must move `5-3-ml-worker-daemon` from `backlog` to `ready-for-dev`.
-- Completion note for sprint tracking: `Ultimate context engine analysis completed - comprehensive developer guide created`.
+- Story status set to `done`.
+- Sprint status updated: `5-3-ml-worker-daemon` → `done`.
+
+### Implementation Notes (2026-03-09, claude-sonnet-4-6)
+
+- **MLWorker design**: dependency-injected `engine`, `model`, `science_config` — fully testable without PyTorch.
+- **poll_once() / run()**: clean separation between single-cycle (tests) and infinite-loop (production) entry points.
+- **Anomaly flag semantics**: worker now reserves `anomaly_flag=True` for bounded-correction breaches; low-confidence predictions stay as deterministic fallbacks and do not increment rollback pressure.
+- **estimate_muscle_group_fatigue** extracted from `adaptation/engine.py._estimate_muscle_group_fatigue` into `data/features.py` as a public function — avoids upward dep on adaptation layer.
+- **RPEModel.fine_tune()** added: EWC-regularized SGD training loop. `load()` updated to use `weights_only=True` per current PyTorch serialization guidance.
+- **Worker resilience**: stuck `processing` rows are logged as operational incidents and left untouched for manual investigation; malformed planned exercise payloads now fail the job instead of silently finishing `done`.
+- **Checkpoint bootstrap**: daemon startup now loads the highest canonical `model_vN.pt` checkpoint and carries the matching in-memory version.
+- **systemd unit**: `MemoryMax=8G` (not deprecated `MemoryLimit`); `Restart=on-failure` per current docs.
+- **388/388 tests pass** including 21 worker tests; 0 regressions.

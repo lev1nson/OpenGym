@@ -426,6 +426,34 @@ python3 router.py --text "<natural language>" [--dry-run] [--json]
 }
 ```
 
+**Structured workout API entrypoint:**
+```bash
+python -m gym_coach_brain.api --intent workout_status
+python -m gym_coach_brain.api --intent workout_start --sleep-hours 7.5 --pre-readiness 5
+```
+
+The stable top-level JSON keys for subprocess callers are:
+- `intent`
+- `argv`
+- `stdout`
+- `exit_code`
+
+Story 6.1 adds an optional additive `data` object for structured flags and identifiers without breaking the four-key contract. Example:
+
+```json
+{
+  "intent": "workout_start",
+  "argv": ["--confirm-second"],
+  "stdout": "Сегодня уже есть завершённая тренировка. Повторный старт требует явного подтверждения флагом --confirm-second.",
+  "exit_code": 1,
+  "data": {
+    "second_session_today": true,
+    "split_day_label": "push",
+    "session_id": 12
+  }
+}
+```
+
 **Needs clarification:**
 ```json
 {

@@ -3,7 +3,6 @@ Database engine and session factory.
 
 Environment variables:
     DATABASE_URL: SQLAlchemy connection string (default: sqlite:///gym_coach.sqlite)
-    MODEL_DIR: Directory for PyTorch model weights (default: ./models/)
 """
 import os
 
@@ -11,7 +10,6 @@ from sqlalchemy import create_engine as _create_engine, event
 from sqlalchemy.orm import Session
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///gym_coach.sqlite")
-MODEL_DIR = os.getenv("MODEL_DIR", "./models/")
 
 
 def get_engine(url: str = DATABASE_URL):

@@ -74,6 +74,7 @@ def build_feature_vector(
     reps: int,
     session: Session,
     cold_start_rpe: float = _DEFAULT_RPE,
+    _now: datetime | None = None,
 ) -> FeatureVector:
     """Build a complete feature vector for a given exercise+session context.
 
@@ -182,7 +183,7 @@ def build_feature_vector(
             last_dt = datetime.fromisoformat(last_session_date_row)
             if last_dt.tzinfo is None:
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
+            now = _now if _now is not None else datetime.now(timezone.utc)
             days_since = max(0, (now - last_dt).days)
         except (ValueError, TypeError):
             days_since = _DEFAULT_DAYS_SINCE
@@ -231,3 +232,56 @@ def build_feature_vector(
         workout_hour_sin=workout_hour_sin,
         workout_hour_cos=workout_hour_cos,
     )
+
+
+def estimate_muscle_group_fatigue(
+    exercise_id: int,
+    current_session_id: int,
+    science,
+    db_session: Session,
+) -> float:
+    """Estimate recent same-muscle workload as a normalized fatigue proxy.
+
+    Extracted from adaptation/engine.py for reuse by MLWorker without creating
+    an upward dependency on the adaptation layer.
+
+    Normalization: total sets over lookback sessions / (PUOS limit * lookback sessions).
+    Returns a value in [0.0, 1.0].
+    """
+    from sqlalchemy import func
+
+    exercise = db_session.get(Exercise, exercise_id)
+    if exercise is None:
+        return 0.0
+
+    recent_session_limit = max(1, science.ml.fatigue_lookback_sessions)
+    recent_session_ids_subq = (
+        db_session.query(WorkoutSession.id)
+        .join(WorkoutSet, WorkoutSet.session_id == WorkoutSession.id)
+        .join(Exercise, WorkoutSet.exercise_id == Exercise.id)
+        .filter(
+            WorkoutSession.status == "completed",
+            WorkoutSession.id != current_session_id,
+            Exercise.primary_muscle_id == exercise.primary_muscle_id,
+        )
+        .order_by(WorkoutSession.session_date.desc(), WorkoutSession.id.desc())
+        .distinct()
+        .limit(recent_session_limit)
+        .subquery()
+    )
+    session_ids = db_session.query(recent_session_ids_subq.c.id).all()
+    if not session_ids:
+        return 0.0
+
+    total_sets = (
+        db_session.query(func.count(WorkoutSet.id))
+        .join(Exercise, WorkoutSet.exercise_id == Exercise.id)
+        .filter(
+            WorkoutSet.session_id.in_([row[0] for row in session_ids]),
+            Exercise.primary_muscle_id == exercise.primary_muscle_id,
+        )
+        .scalar()
+        or 0
+    )
+    capacity = float(max(1, science.puos.max_sets_per_group * recent_session_limit))
+    return min(1.0, float(total_sets) / capacity)

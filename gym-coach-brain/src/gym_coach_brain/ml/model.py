@@ -3,6 +3,7 @@ RPEModel — PyTorch MLP with MC Dropout uncertainty estimation.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from gym_coach_brain.ml.constants import FEATURE_DIM, MC_DROPOUT_PASSES
@@ -103,13 +104,56 @@ class RPEModel(RPEModelProtocol):
         import torch
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self._get_network().state_dict(), path)
+        tmp_path = path.with_suffix(".tmp")
+        torch.save(self._get_network().state_dict(), tmp_path)
+        os.replace(tmp_path, path)
 
     def load(self, path: Path) -> None:
         import torch
 
-        state_dict = torch.load(path, map_location="cpu")
+        state_dict = torch.load(path, map_location="cpu", weights_only=True)
         self._get_network().load_state_dict(state_dict)
+
+    def fine_tune(
+        self,
+        training_samples: list[dict],
+        epochs: int = 10,
+        lr: float = 0.001,
+    ) -> None:
+        """Fine-tune the model on new training samples with EWC regularization.
+
+        Each sample must contain all feature keys plus ``target_rpe`` (float).
+        Samples without ``target_rpe`` are skipped silently.
+        No-op when training_samples is empty.
+        """
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+
+        from gym_coach_brain.ml.ewc import EWC
+
+        if not training_samples:
+            return
+
+        network = self._get_network()
+        ewc = EWC(self, lambda_=100.0)
+        ewc.update_fisher(training_samples)
+
+        optimizer = optim.SGD(network.parameters(), lr=lr)
+        criterion = nn.MSELoss()
+
+        network.train()
+        for _ in range(epochs):
+            for sample in training_samples:
+                if "target_rpe" not in sample:
+                    continue
+                x = self._features_to_tensor(sample)
+                target = torch.tensor([[float(sample["target_rpe"])]], dtype=torch.float32)
+                optimizer.zero_grad()
+                out = self._forward(x).unsqueeze(0)
+                loss = criterion(out, target) + ewc.penalty(self)
+                loss.backward()
+                optimizer.step()
 
     @property
     def network(self):

@@ -4,6 +4,7 @@ Uses in-memory DB with taxonomy + exercise seed data.
 No conftest.py — project convention: each test file defines fixtures locally.
 """
 import json
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -17,7 +18,12 @@ from gym_coach_brain.api.handlers import (
     handle_profile_show,
     handle_profile_update_equipment,
     handle_profile_update_split,
+    handle_workout_finish,
+    handle_workout_log_set,
+    handle_workout_recap,
     handle_workout_start,
+    handle_workout_status,
+    handle_workout_summary,
 )
 from gym_coach_brain.core.science import (
     MethodologiesConfig,
@@ -38,6 +44,7 @@ from gym_coach_brain.data.models import (
     TrainingSplit,
     UserProfile,
     WorkoutSession,
+    WorkoutSet,
 )
 from gym_coach_brain.data.seed import seed_all, seed_exercises, seed_taxonomy
 
@@ -225,6 +232,10 @@ def mock_science():
     return cfg
 
 
+def _today_iso() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def test_onboarding_start_returns_first_question(onboarding_session, mock_science):
     stdout, exit_code = handle_onboarding_start([], onboarding_session, mock_science)
     assert exit_code == 0
@@ -395,6 +406,7 @@ def test_profile_update_split_invalid(onboarding_session, mock_science):
 def test_workout_start_persists_split_day_label_and_planned_exercises(
     handler_session, mock_science
 ):
+    today = _today_iso()
     profile = UserProfile(
         onboarding_complete=True,
         training_split=TrainingSplit.ppl,
@@ -409,7 +421,7 @@ def test_workout_start_persists_split_day_label_and_planned_exercises(
     handler_session.flush()
 
     readiness = ReadinessLog(
-        session_date="2026-03-09",
+        session_date=today,
         sleep_hours=8.0,
         stress_level=2,
         hrv_score=None,
@@ -443,7 +455,7 @@ def test_workout_start_persists_split_day_label_and_planned_exercises(
     assert ml_job.session_id == workout_session.id
 
 
-def test_workout_start_requires_pre_checkin_args(handler_session, mock_science):
+def test_workout_start_without_pre_checkin_args_still_creates_session(handler_session, mock_science):
     profile = UserProfile(
         onboarding_complete=True,
         training_split=TrainingSplit.ppl,
@@ -459,6 +471,302 @@ def test_workout_start_requires_pre_checkin_args(handler_session, mock_science):
 
     stdout, exit_code = handle_workout_start([], handler_session, mock_science)
 
+    assert exit_code == 0
+    workout_session = handler_session.query(WorkoutSession).one()
+    assert workout_session.sleep_hours is None
+    assert workout_session.pre_readiness is None
+
+
+def _create_ready_profile(session: Session) -> UserProfile:
+    profile = UserProfile(
+        onboarding_complete=True,
+        training_split=TrainingSplit.ppl,
+        available_equipment=json.dumps(["barbell", "dumbbell", "bodyweight", "pullup_bar"]),
+        bodyweight_kg=80.0,
+        experience_level="intermediate",
+        training_days_per_week=4,
+        goal="hypertrophy",
+        initial_weight_coefficients=json.dumps(
+            {
+                "horizontal_push": 70.0,
+                "horizontal_pull": 65.0,
+                "squat": 80.0,
+            }
+        ),
+    )
+    session.add(profile)
+    session.flush()
+    return profile
+
+
+def _start_workout(session: Session, science: ScienceConfig) -> WorkoutSession:
+    stdout, exit_code = handle_workout_start([], session, science)
+    assert exit_code == 0, stdout
+    return session.query(WorkoutSession).order_by(WorkoutSession.id.desc()).first()
+
+
+def test_workout_start_blocks_orphaned_active_session(handler_session, mock_science):
+    today = _today_iso()
+    _create_ready_profile(handler_session)
+    orphan = WorkoutSession(session_date=today, status="active", split_day_label="push")
+    handler_session.add(orphan)
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_start([], handler_session, mock_science)
+
     assert exit_code == 1
-    assert "--sleep-hours" in stdout
-    assert handler_session.query(WorkoutSession).count() == 0
+    assert "активная" in stdout.lower()
+    assert handler_session.info["response_data"]["orphaned_session"] is True
+    assert handler_session.info["response_data"]["orphaned_session_id"] == orphan.id
+    assert handler_session.query(WorkoutSession).count() == 1
+
+
+def test_workout_start_requires_confirmation_for_second_session_today(handler_session, mock_science):
+    today = _today_iso()
+    _create_ready_profile(handler_session)
+    completed = WorkoutSession(
+        session_date=today,
+        status="completed",
+        split_day_label="push",
+        planned_exercises="[]",
+    )
+    handler_session.add(completed)
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_start([], handler_session, mock_science)
+
+    assert exit_code == 1
+    assert "подтверждения" in stdout.lower()
+    assert handler_session.info["response_data"]["second_session_today"] is True
+    assert handler_session.info["response_data"]["split_day_label"] == "push"
+
+
+def test_workout_start_confirmed_second_session_reuses_split_label(handler_session, mock_science):
+    today = _today_iso()
+    _create_ready_profile(handler_session)
+    completed = WorkoutSession(
+        session_date=today,
+        status="completed",
+        split_day_label="pull",
+        planned_exercises="[]",
+    )
+    handler_session.add(completed)
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_start(["--confirm-second"], handler_session, mock_science)
+
+    assert exit_code == 0
+    active = (
+        handler_session.query(WorkoutSession)
+        .filter_by(status="active")
+        .order_by(WorkoutSession.id.desc())
+        .one()
+    )
+    assert active.split_day_label == "pull"
+    assert "id:" in stdout
+
+
+def test_workout_start_without_readiness_log_still_enqueues_predict(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+
+    stdout, exit_code = handle_workout_start([], handler_session, mock_science)
+
+    assert exit_code == 0
+    assert handler_session.query(WorkoutSession).count() == 1
+    assert handler_session.query(MLJob).count() == 1
+
+
+def test_workout_status_returns_error_without_active_session(handler_session):
+    stdout, exit_code = handle_workout_status([], handler_session)
+
+    assert exit_code == 1
+    assert "не найдена" in stdout.lower()
+
+
+def test_workout_status_shows_progress_and_logged_sets(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+    workout_session = _start_workout(handler_session, mock_science)
+    planned = json.loads(workout_session.planned_exercises)
+    exercise_id = planned[0]["exercise_id"]
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", str(exercise_id),
+            "--set-number", "1",
+            "--weight-kg", "70",
+            "--reps", "8",
+            "--rir", "2",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 0
+
+    stdout, exit_code = handle_workout_status([], handler_session)
+
+    assert exit_code == 0
+    assert "✅ 1/" in stdout
+    assert "set 1" in stdout
+
+
+def test_workout_log_set_validation_duplicate_and_beyond_plan(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+    workout_session = _start_workout(handler_session, mock_science)
+    planned = json.loads(workout_session.planned_exercises)
+    exercise = planned[0]
+    exercise_id = exercise["exercise_id"]
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", str(exercise_id),
+            "--set-number", "1",
+            "--weight-kg", "70",
+            "--reps", "8",
+            "--rir", "2",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 0
+    workout_set = handler_session.query(WorkoutSet).one()
+    assert workout_set.rir == 2
+    assert workout_set.rpe == pytest.approx(8.0)
+    assert "Рекомендация" in stdout
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", str(exercise_id),
+            "--set-number", "1",
+            "--weight-kg", "70",
+            "--reps", "8",
+            "--rir", "2",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 1
+
+    beyond_plan_set = exercise["sets"] + 1
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", str(exercise_id),
+            "--set-number", str(beyond_plan_set),
+            "--weight-kg", "67.5",
+            "--reps", "6",
+            "--rir", "1",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 0
+    assert "сверх плана" in stdout.lower()
+
+
+def test_workout_log_set_rejects_unknown_exercise_and_invalid_values(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+    _start_workout(handler_session, mock_science)
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", "9999",
+            "--set-number", "1",
+            "--weight-kg", "70",
+            "--reps", "8",
+            "--rir", "2",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 1
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", "1",
+            "--set-number", "1",
+            "--weight-kg", "-1",
+            "--reps", "0",
+            "--rir", "7",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 1
+
+
+def test_workout_finish_marks_completed_and_repeated_finish_fails(handler_session, mock_science):
+    _create_ready_profile(handler_session)
+    workout_session = _start_workout(handler_session, mock_science)
+    planned = json.loads(workout_session.planned_exercises)
+    exercise_id = planned[0]["exercise_id"]
+
+    stdout, exit_code = handle_workout_log_set(
+        [
+            "--exercise-id", str(exercise_id),
+            "--set-number", "1",
+            "--weight-kg", "70",
+            "--reps", "8",
+            "--rir", "2",
+        ],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 0
+
+    stdout, exit_code = handle_workout_finish([], handler_session, mock_science)
+
+    assert exit_code == 0
+    assert "Итоги тренировки" in stdout
+    handler_session.refresh(workout_session)
+    assert workout_session.status == "completed"
+
+    stdout, exit_code = handle_workout_finish([], handler_session, mock_science)
+    assert exit_code == 1
+
+
+def test_workout_recap_and_summary_delegate_to_adaptation_modules(handler_session, mock_science):
+    today = _today_iso()
+    _create_ready_profile(handler_session)
+    bench = handler_session.query(Exercise).filter_by(name="Bench Press").one()
+    completed = WorkoutSession(
+        session_date=today,
+        status="completed",
+        planned_exercises=json.dumps([{"exercise_name": "Bench Press"}]),
+        split_day_label="push",
+    )
+    handler_session.add(completed)
+    handler_session.flush()
+    handler_session.add(
+        WorkoutSet(
+            session_id=completed.id,
+            exercise_id=bench.id,
+            set_number=1,
+            weight_kg=80.0,
+            reps=8,
+            rir=2,
+            rpe=8.0,
+        )
+    )
+    handler_session.flush()
+
+    stdout, exit_code = handle_workout_recap([], handler_session)
+    assert exit_code == 0
+    assert "Bench Press" in stdout
+
+    stdout, exit_code = handle_workout_summary([], handler_session, mock_science)
+    assert exit_code == 0
+    assert "Итоги тренировки" in stdout
+
+    stdout, exit_code = handle_workout_summary(
+        ["--session-id", str(completed.id)],
+        handler_session,
+        mock_science,
+    )
+    assert exit_code == 0
+    assert "Выполнено подходов" in stdout
+
+
+def test_workout_summary_returns_error_when_history_missing(handler_session, mock_science):
+    stdout, exit_code = handle_workout_summary([], handler_session, mock_science)
+
+    assert exit_code == 1
+    assert "пуста" in stdout.lower()

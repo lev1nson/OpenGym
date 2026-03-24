@@ -74,6 +74,8 @@ class WorkoutPlanner:
         science: "ScienceConfig",
         db_session: "SASession",
         recovery_signal: "RecoverySignal | None" = None,
+        _today: "date | None" = None,
+        forced_split_day_label: str | None = None,
     ) -> WorkoutPlan:
         """Generate complete workout plan for today.
 
@@ -88,7 +90,7 @@ class WorkoutPlanner:
         """
         from gym_coach_brain.data.models import WorkoutSession
 
-        today = date.today()
+        today = _today if _today is not None else date.today()
 
         # ── Step 1: Find last completed session ──────────────────────────────
         last_session: WorkoutSession | None = (
@@ -99,9 +101,15 @@ class WorkoutPlanner:
         )
 
         # ── Step 2: Determine split day and muscle groups ────────────────────
-        split_label, muscle_groups = self._determine_split_day(
-            user_profile, last_session, db_session
-        )
+        if forced_split_day_label is not None:
+            split_label = forced_split_day_label
+            muscle_groups = self._determine_muscle_groups_for_label(
+                user_profile, split_label, last_session, db_session
+            )
+        else:
+            split_label, muscle_groups = self._determine_split_day(
+                user_profile, last_session, db_session
+            )
 
         # ── Step 3: Apply min_rest_days filter ───────────────────────────────
         warnings: list[str] = []
@@ -203,44 +211,22 @@ class WorkoutPlanner:
         db_session: "SASession",
     ) -> tuple[str, list["MuscleGroup"]]:
         """Return (today_split_label, muscle_groups_for_today)."""
-        from gym_coach_brain.data.models import MuscleGroup, TrainingSplit
+        from gym_coach_brain.data.models import TrainingSplit
 
         split = user_profile.training_split
         prev_label = last_session.split_day_label if last_session else None
-
-        # Query all muscle groups once
-        all_groups: list[MuscleGroup] = db_session.query(MuscleGroup).all()
-
-        def groups_by_body_region(region: str) -> list[MuscleGroup]:
-            return [g for g in all_groups if g.body_region == region]
-
-        def groups_push() -> list[MuscleGroup]:
-            return [g for g in all_groups if g.is_push and g.body_region == "upper"]
-
-        def groups_pull() -> list[MuscleGroup]:
-            return [g for g in all_groups if g.is_pull and g.body_region == "upper"]
-
-        def groups_legs() -> list[MuscleGroup]:
-            return [g for g in all_groups if g.body_region == "lower"]
 
         # Normalize split to string for comparison
         split_str = split.value if hasattr(split, "value") else str(split)
 
         if split_str in (TrainingSplit.full_body, TrainingSplit.full_body.value, "full_body"):
-            return "full_body", all_groups
+            today_label = "full_body"
 
         elif split_str in (TrainingSplit.upper_lower, TrainingSplit.upper_lower.value, "upper_lower"):
             if not prev_label or prev_label not in ("upper", "lower"):
                 today_label = "upper"
             else:
                 today_label = "lower" if prev_label == "upper" else "upper"
-
-            groups = (
-                groups_by_body_region("upper")
-                if today_label == "upper"
-                else groups_by_body_region("lower")
-            )
-            return today_label, groups
 
         elif split_str in (TrainingSplit.ppl, TrainingSplit.ppl.value, "ppl"):
             if not prev_label or prev_label not in _PPL_CYCLE:
@@ -249,20 +235,53 @@ class WorkoutPlanner:
                 idx = _PPL_CYCLE.index(prev_label)
                 today_label = _PPL_CYCLE[(idx + 1) % len(_PPL_CYCLE)]
 
-            if today_label == "push":
-                groups = groups_push()
-            elif today_label == "pull":
-                groups = groups_pull()
-            else:  # legs
-                groups = groups_legs()
-            return today_label, groups
-
         else:  # custom
-            if last_session is not None:
-                groups = self._get_last_session_muscle_groups(last_session, db_session)
-                if groups:
-                    return "full_body", groups
-            return "full_body", all_groups
+            today_label = "full_body"
+
+        return today_label, self._determine_muscle_groups_for_label(
+            user_profile, today_label, last_session, db_session
+        )
+
+    def _determine_muscle_groups_for_label(
+        self,
+        user_profile: "UserProfile",
+        split_label: str,
+        last_session: "WorkoutSession | None",
+        db_session: "SASession",
+    ) -> list["MuscleGroup"]:
+        """Return muscle groups for an explicit split label without advancing the cycle."""
+        from gym_coach_brain.data.models import MuscleGroup, TrainingSplit
+
+        split = user_profile.training_split
+        split_str = split.value if hasattr(split, "value") else str(split)
+        all_groups: list[MuscleGroup] = db_session.query(MuscleGroup).all()
+
+        if split_str in (TrainingSplit.full_body, TrainingSplit.full_body.value, "full_body"):
+            return all_groups
+
+        if split_str in (TrainingSplit.upper_lower, TrainingSplit.upper_lower.value, "upper_lower"):
+            region = "upper" if split_label == "upper" else "lower"
+            return [group for group in all_groups if group.body_region == region]
+
+        if split_str in (TrainingSplit.ppl, TrainingSplit.ppl.value, "ppl"):
+            if split_label == "push":
+                return [
+                    group for group in all_groups
+                    if group.is_push and group.body_region == "upper"
+                ]
+            if split_label == "pull":
+                return [
+                    group for group in all_groups
+                    if group.is_pull and group.body_region == "upper"
+                ]
+            return [group for group in all_groups if group.body_region == "lower"]
+
+        if last_session is not None:
+            groups = self._get_last_session_muscle_groups(last_session, db_session)
+            if groups:
+                return groups
+
+        return all_groups
 
     def _get_last_session_muscle_groups(
         self, last_session: "WorkoutSession", db_session: "SASession"

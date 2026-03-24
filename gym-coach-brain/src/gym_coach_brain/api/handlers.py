@@ -11,12 +11,17 @@ Handler contract:
 """
 import argparse
 import json
+from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from gym_coach_brain.adaptation.recap import generate_recap
+from gym_coach_brain.adaptation.summary import generate_summary
+from gym_coach_brain.core.apre import calculate_apre_adjustment, rpe_from_rir
 from gym_coach_brain.core.onboarding import (
     QUESTIONS,
     QuestionType,
@@ -25,6 +30,7 @@ from gym_coach_brain.core.onboarding import (
     map_answer_to_coefficients,
 )
 from gym_coach_brain.core.readiness import calculate_recovery_signal
+from gym_coach_brain.core.weight_utils import round_to_equipment_increment
 from gym_coach_brain.data.models import (
     EquipmentType,
     Exercise,
@@ -33,6 +39,7 @@ from gym_coach_brain.data.models import (
     ReadinessLog,
     UserProfile,
     WorkoutSession,
+    WorkoutSet,
 )
 from gym_coach_brain.data.queue import enqueue_predict
 
@@ -138,6 +145,44 @@ def _format_question(idx: int, total: int, question) -> str:
 def _get_or_none(session: Session) -> UserProfile | None:
     """Return first (single) user profile or None."""
     return session.query(UserProfile).first()
+
+
+def _set_response_data(session: Session, **data: object) -> None:
+    """Attach additive JSON payload for the API boundary."""
+    payload = session.info.get("response_data", {}).copy()
+    payload.update(data)
+    session.info["response_data"] = payload
+
+
+def _load_planned_exercises(workout_session: WorkoutSession) -> list[dict]:
+    """Parse planned_exercises safely into a list of dicts."""
+    try:
+        planned_raw = json.loads(workout_session.planned_exercises or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(planned_raw, list):
+        return []
+    return [item for item in planned_raw if isinstance(item, dict)]
+
+
+def _planned_exercises_by_id(workout_session: WorkoutSession) -> dict[int, dict]:
+    """Return plan rows keyed by exercise_id, ignoring malformed entries."""
+    planned: dict[int, dict] = {}
+    for item in _load_planned_exercises(workout_session):
+        exercise_id = item.get("exercise_id")
+        if isinstance(exercise_id, int):
+            planned[exercise_id] = item
+    return planned
+
+
+def _active_workout_session(session: Session) -> WorkoutSession | None:
+    """Return the current active workout session, if any."""
+    return (
+        session.query(WorkoutSession)
+        .filter(WorkoutSession.status == "active")
+        .order_by(WorkoutSession.id.desc())
+        .first()
+    )
 
 
 def handle_onboarding_start(
@@ -461,20 +506,21 @@ def handle_workout_start(
     from gym_coach_brain.core.planner import WorkoutPlanner
 
     parser = argparse.ArgumentParser(prog="workout_start", add_help=False)
-    parser.add_argument("--sleep-hours", type=float, required=True)
-    parser.add_argument("--pre-readiness", type=int, required=True)
+    parser.add_argument("--sleep-hours", type=float)
+    parser.add_argument("--pre-readiness", type=int)
+    parser.add_argument("--confirm-second", action="store_true", default=False)
     try:
         args = parser.parse_args(argv)
     except SystemExit:
         return (
-            "workout_start: required --sleep-hours <5.0|6.5|7.5|9.0> "
-            "--pre-readiness <2|5|9>",
+            "workout_start: optional --sleep-hours <5.0|6.5|7.5|9.0> "
+            "--pre-readiness <2|5|9> --confirm-second",
             1,
         )
 
-    if args.sleep_hours not in {5.0, 6.5, 7.5, 9.0}:
+    if args.sleep_hours is not None and args.sleep_hours not in {5.0, 6.5, 7.5, 9.0}:
         return "workout_start: --sleep-hours must be one of 5.0, 6.5, 7.5, 9.0", 1
-    if args.pre_readiness not in {2, 5, 9}:
+    if args.pre_readiness is not None and args.pre_readiness not in {2, 5, 9}:
         return "workout_start: --pre-readiness must be one of 2, 5, 9", 1
 
     profile = _get_or_none(session)
@@ -485,6 +531,40 @@ def handle_workout_start(
 
     today = datetime.now(timezone.utc).date().isoformat()
 
+    active_session = _active_workout_session(session)
+    if active_session is not None:
+        _set_response_data(
+            session,
+            orphaned_session=True,
+            orphaned_session_id=active_session.id,
+            orphaned_session_date=active_session.session_date[:10],
+        )
+        return (
+            "Уже есть активная тренировка. Завершите или разберите текущую сессию перед стартом новой.",
+            1,
+        )
+
+    completed_today = (
+        session.query(WorkoutSession)
+        .filter(
+            WorkoutSession.status == "completed",
+            WorkoutSession.session_date.like(f"{today}%"),
+        )
+        .order_by(WorkoutSession.id.desc())
+        .first()
+    )
+    if completed_today is not None and not args.confirm_second:
+        _set_response_data(
+            session,
+            second_session_today=True,
+            split_day_label=completed_today.split_day_label,
+            session_id=completed_today.id,
+        )
+        return (
+            "Сегодня уже есть завершённая тренировка. Повторный старт требует явного подтверждения флагом --confirm-second.",
+            1,
+        )
+
     readiness_log = session.query(ReadinessLog).filter_by(session_date=today).first()
     recovery_signal = (
         calculate_recovery_signal(readiness_log, science)
@@ -492,7 +572,18 @@ def handle_workout_start(
         else None
     )
 
-    plan = WorkoutPlanner().generate(profile, science, session, recovery_signal)
+    forced_split_day_label = (
+        completed_today.split_day_label
+        if completed_today is not None and args.confirm_second
+        else None
+    )
+    plan = WorkoutPlanner().generate(
+        profile,
+        science,
+        session,
+        recovery_signal,
+        forced_split_day_label=forced_split_day_label,
+    )
     planned_exercises = [asdict(exercise) for exercise in plan.exercises]
 
     workout_session = WorkoutSession(
@@ -527,4 +618,212 @@ def handle_workout_start(
     if plan.warnings:
         lines.extend(["", *plan.warnings])
 
+    _set_response_data(
+        session,
+        session_id=workout_session.id,
+        split_day_label=plan.split_day_label,
+    )
     return "\n".join(lines), 0
+
+
+def handle_workout_status(argv: list[str], session: Session) -> tuple[str, int]:
+    """Show the active workout plan plus logged-set progress."""
+    del argv
+
+    workout_session = _active_workout_session(session)
+    if workout_session is None:
+        return "Активная тренировка не найдена.", 1
+
+    planned_by_id = _planned_exercises_by_id(workout_session)
+    logged_sets = (
+        session.query(WorkoutSet)
+        .filter(WorkoutSet.session_id == workout_session.id)
+        .order_by(WorkoutSet.exercise_id, WorkoutSet.set_number)
+        .all()
+    )
+    sets_by_exercise: dict[int, list[WorkoutSet]] = defaultdict(list)
+    for workout_set in logged_sets:
+        sets_by_exercise[workout_set.exercise_id].append(workout_set)
+
+    lines = [
+        f"Активная тренировка #{workout_session.id}",
+        f"Дата: {workout_session.session_date[:10]}",
+    ]
+    if workout_session.split_day_label:
+        lines.append(f"Сплит: {workout_session.split_day_label}")
+    lines.append("")
+
+    for index, exercise in enumerate(_load_planned_exercises(workout_session), start=1):
+        exercise_id = exercise.get("exercise_id")
+        if not isinstance(exercise_id, int):
+            continue
+        planned_sets = exercise.get("sets") if isinstance(exercise.get("sets"), int) else 0
+        done_sets = len(sets_by_exercise.get(exercise_id, []))
+        status = (
+            f"✅ {done_sets}/{planned_sets}"
+            if done_sets > 0
+            else "⏳ not started"
+        )
+        lines.append(
+            f"{index}. {exercise.get('exercise_name', f'exercise_{exercise_id}')} "
+            f"(id:{exercise_id}): {status}"
+        )
+        for logged_set in sets_by_exercise.get(exercise_id, []):
+            rir_text = "?" if logged_set.rir is None else str(logged_set.rir)
+            rpe_text = "?" if logged_set.rpe is None else f"{logged_set.rpe:.1f}"
+            lines.append(
+                f"   set {logged_set.set_number}: "
+                f"{logged_set.weight_kg:.1f}кг x {logged_set.reps} "
+                f"(RIR {rir_text}, RPE {rpe_text})"
+            )
+
+    _set_response_data(session, session_id=workout_session.id)
+    return "\n".join(lines), 0
+
+
+def handle_workout_log_set(
+    argv: list[str], session: Session, science: "ScienceConfig"
+) -> tuple[str, int]:
+    """Persist one structured set for the active workout session."""
+    parser = argparse.ArgumentParser(prog="workout_log_set", add_help=False)
+    parser.add_argument("--exercise-id", required=True, type=int)
+    parser.add_argument("--set-number", required=True, type=int)
+    parser.add_argument("--weight-kg", required=True, type=float)
+    parser.add_argument("--reps", required=True, type=int)
+    parser.add_argument("--rir", required=True, type=int)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return (
+            "workout_log_set: required --exercise-id --set-number --weight-kg --reps --rir",
+            1,
+        )
+
+    if args.weight_kg < 0.0:
+        return "workout_log_set: --weight-kg must be >= 0.0", 1
+    if args.reps < 1:
+        return "workout_log_set: --reps must be >= 1", 1
+    if args.set_number < 1:
+        return "workout_log_set: --set-number must be >= 1", 1
+    if args.rir not in {0, 1, 2, 3, 4}:
+        return "workout_log_set: --rir must be between 0 and 4", 1
+
+    workout_session = _active_workout_session(session)
+    if workout_session is None:
+        return "Активная тренировка не найдена.", 1
+
+    planned_by_id = _planned_exercises_by_id(workout_session)
+    planned_exercise = planned_by_id.get(args.exercise_id)
+    if planned_exercise is None:
+        return f"exercise_id {args.exercise_id} не найден в активном плане.", 1
+
+    duplicate = (
+        session.query(WorkoutSet)
+        .filter_by(
+            session_id=workout_session.id,
+            exercise_id=args.exercise_id,
+            set_number=args.set_number,
+        )
+        .first()
+    )
+    if duplicate is not None:
+        return "Такой подход уже записан для этого упражнения.", 1
+
+    exercise = session.get(Exercise, args.exercise_id)
+    if exercise is None:
+        return f"Упражнение с id={args.exercise_id} не найдено.", 1
+
+    workout_set = WorkoutSet(
+        session_id=workout_session.id,
+        exercise_id=args.exercise_id,
+        set_number=args.set_number,
+        weight_kg=args.weight_kg,
+        reps=args.reps,
+        rir=args.rir,
+        rpe=rpe_from_rir(args.rir),
+    )
+    session.add(workout_set)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        return "Такой подход уже записан для этого упражнения.", 1
+
+    rep_range = planned_exercise.get("rep_range", [])
+    target_reps = rep_range[0] if isinstance(rep_range, list) and rep_range else args.reps
+    recommended_weight = calculate_apre_adjustment(
+        actual_reps=args.reps,
+        target_reps=int(target_reps),
+        current_weight=args.weight_kg,
+        science=science,
+    )
+    rounded_recommendation = round_to_equipment_increment(
+        recommended_weight,
+        EquipmentType(exercise.equipment_type),
+        science,
+    )
+
+    lines = [
+        f"✅ Подход записан: {exercise.name} — {args.weight_kg:.1f}кг x {args.reps}",
+        f"RIR {args.rir} → RPE {workout_set.rpe:.1f}",
+        f"Рекомендация на следующий подход: {rounded_recommendation:.1f}кг",
+    ]
+
+    planned_sets = planned_exercise.get("sets") if isinstance(planned_exercise.get("sets"), int) else 0
+    if args.set_number > planned_sets:
+        lines.append("⚠️ Подход сверх плана сохранён и не был отклонён.")
+
+    _set_response_data(session, session_id=workout_session.id)
+    return "\n".join(lines), 0
+
+
+def handle_workout_finish(
+    argv: list[str], session: Session, science: "ScienceConfig"
+) -> tuple[str, int]:
+    """Complete the active workout session and return the generated summary."""
+    del argv
+
+    workout_session = _active_workout_session(session)
+    if workout_session is None:
+        return "Активная тренировка не найдена.", 1
+
+    workout_session.status = "completed"
+    session.flush()
+    summary = generate_summary(workout_session, session, science)
+    _set_response_data(session, session_id=workout_session.id)
+    return summary, 0
+
+
+def handle_workout_recap(argv: list[str], session: Session) -> tuple[str, int]:
+    """Return the recap for the latest completed session."""
+    del argv
+    return generate_recap(session), 0
+
+
+def handle_workout_summary(
+    argv: list[str], session: Session, science: "ScienceConfig"
+) -> tuple[str, int]:
+    """Return a summary for the requested or latest completed session."""
+    parser = argparse.ArgumentParser(prog="workout_summary", add_help=False)
+    parser.add_argument("--session-id", type=int)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        return "workout_summary: optional --session-id <id>", 1
+
+    if args.session_id is not None:
+        workout_session = session.get(WorkoutSession, args.session_id)
+        if workout_session is None or workout_session.status != "completed":
+            return "Завершённая тренировка с таким session_id не найдена.", 1
+    else:
+        workout_session = (
+            session.query(WorkoutSession)
+            .filter(WorkoutSession.status == "completed")
+            .order_by(WorkoutSession.session_date.desc(), WorkoutSession.id.desc())
+            .first()
+        )
+        if workout_session is None:
+            return "История завершённых тренировок пока пуста.", 1
+
+    _set_response_data(session, session_id=workout_session.id)
+    return generate_summary(workout_session, session, science), 0
