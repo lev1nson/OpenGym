@@ -780,11 +780,18 @@ def test_previous_performance_uses_core_weight_after_ml_down_adjustment(
     assert result.exercises[0].target_reps == 9
 
 
-def test_direct_ml_path_scales_final_weight_by_recovery_coefficient(
+def test_direct_ml_path_recovery_composition_corrected(
     mock_science_config,
     db_session,
 ):
-    """Direct ML path should apply recovery scaling to the final recommended weight."""
+    """Direct ML path with P0 bug fix: recovery applies to core BEFORE adding ML delta.
+
+    P0 Bug: old code multiplied ml_weight by recovery_coeff, suppressing ML adjustments.
+    Fix: new code applies recovery to core baseline, then adds ML delta on top.
+
+    With core=80.0, recovery=0.82, the base after recovery is 65.6.
+    ML delta is preserved on top of that (not multiplied by recovery).
+    """
     ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
     user = _make_user_profile()
 
@@ -812,7 +819,7 @@ def test_direct_ml_path_scales_final_weight_by_recovery_coefficient(
     result = engine.adapt(session, user, recovery_signal, mock_science_config, db_session)
 
     assert result.exercises[0].used_ml is True
-    assert result.exercises[0].target_weight_kg == pytest.approx(67.5)
+    assert result.exercises[0].target_weight_kg == pytest.approx(70.0)
 
 
 def test_fatigue_lookback_sessions_is_independent_from_rest_days(mock_science_config, db_session):
@@ -1067,3 +1074,74 @@ def test_history_lookup_ignores_future_sessions(mock_science_config, db_session)
     # 70kg x 10 -> 70kg x 11 (next step in double progression)
     assert result.exercises[0].target_weight_kg == pytest.approx(70.0)
     assert result.exercises[0].target_reps == 11
+
+
+# ─── Recovery Composition Tests (P0 Bug Fix) ──────────────────────────────────
+
+def test_recovery_composition_preserves_ml_delta(mock_science_config, db_session):
+    """P0 Bug Fix: Recovery should apply to core baseline BEFORE adding ML delta.
+
+    Before fix: new_weight = ml_weight * recovery_coeff (ML delta suppressed)
+    After fix:  new_weight = core * recovery + (ml_weight - core) = ml_weight * recovery + core * (1 - recovery)
+
+    This ensures low recovery reduces the base load but preserves the ML adjustment direction.
+    """
+    ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
+    user = _make_user_profile()
+
+    _make_completed_session_with_sets(
+        db_session,
+        exercise_id=ex.id,
+        date="2026-03-07T10:00:00",
+        weight_kg=80.0,
+        reps=8,
+    )
+    session = _make_session(db_session, [
+        {"exercise_id": ex.id, "exercise_name": "Bench Press", "sets": 3, "target_weight_kg": 80.0}
+    ], status="active")
+    recovery_signal = RecoverySignal(
+        coefficient=0.82,
+        sleep_component=0.9,
+        stress_component=0.8,
+        hrv_component=0.7,
+    )
+
+    model = Mock()
+    model.predict.return_value = (5.0, 0.85)
+
+    engine = AdaptationEngine(rpe_model=model)
+    result = engine.adapt(session, user, recovery_signal, mock_science_config, db_session)
+
+    assert result.exercises[0].used_ml is True
+    assert result.exercises[0].target_weight_kg == pytest.approx(70.0)
+
+
+def test_no_ml_path_recovery_applies_to_planned_weight(mock_science_config, db_session):
+    """When ML is not used, recovery should still apply to the planned weight.
+
+    This is the fallback path and should not be affected by the ML delta composition fix.
+    """
+    ex = _make_exercise(db_session, equipment_type=EquipmentType.barbell)
+    user = _make_user_profile()
+
+    session = _make_session(db_session, [
+        {
+            "exercise_id": ex.id,
+            "exercise_name": "Bench Press",
+            "sets": 3,
+            "target_reps": 10,
+            "target_weight_kg": 80.0,
+        }
+    ])
+    recovery_signal = RecoverySignal(
+        coefficient=0.82,
+        sleep_component=0.9,
+        stress_component=0.8,
+        hrv_component=0.7,
+    )
+
+    engine = AdaptationEngine(rpe_model=None)
+    result = engine.adapt(session, user, recovery_signal, mock_science_config, db_session)
+
+    assert result.exercises[0].used_ml is False
+    assert result.exercises[0].target_weight_kg == pytest.approx(65.0)

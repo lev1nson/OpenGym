@@ -168,12 +168,13 @@ class Exercise(Base):
     name = Column(String, nullable=False, unique=True)
     primary_muscle_id = Column(Integer, ForeignKey("muscle_groups.id"), nullable=False)
     movement_pattern_id = Column(Integer, ForeignKey("movement_patterns.id"), nullable=False)
-    # JSON-encoded list of MuscleGroup IDs
     secondary_muscle_ids = Column(Text, nullable=False, default="[]")
     is_compound = Column(Boolean, nullable=False, default=True)
     stretch_mediated = Column(Boolean, nullable=False, default=False)
-    # SQLAlchemyEnum per AC — not a free string; CHECK constraint enforces DB-level validation
     equipment_type = Column(SAEnum(EquipmentType, name="equipmenttype"), nullable=False)
+    exercise_family = Column(String, nullable=True)
+    requires_concrete_inventory = Column(Boolean, nullable=False, default=False)
+    concrete_item_id = Column(String, nullable=True)
 
     __table_args__ = (
         CheckConstraint(

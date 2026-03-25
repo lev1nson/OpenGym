@@ -867,6 +867,44 @@ class TestAntagonistBalance:
         assert not any("Дисбаланс" in w for w in plan.warnings)
 
 
+# ─── Target RPE Tests ─────────────────────────────────────────────────────────
+
+class TestTargetRPE:
+    def test_planned_exercise_includes_target_rpe(self, db_session, mock_science_config):
+        """PlannedExercise should include target_rpe derived from science config."""
+        mp = create_test_movement_pattern(db_session)
+        mg = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        create_test_exercise(db_session, "bench", mg, mp, equipment_type="barbell")
+
+        profile = create_test_user_profile(db_session, training_split="full_body")
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        assert len(plan.exercises) > 0
+        for exercise in plan.exercises:
+            assert hasattr(exercise, "target_rpe")
+            assert exercise.target_rpe is not None
+            expected_rpe = (mock_science_config.ml.rpe_easy_threshold + mock_science_config.ml.rpe_hard_threshold) / 2.0
+            assert exercise.target_rpe == pytest.approx(expected_rpe)
+
+    def test_target_rpe_persists_via_asdict(self, db_session, mock_science_config):
+        """target_rpe should be included when PlannedExercise is serialized via asdict()."""
+        from dataclasses import asdict
+
+        mp = create_test_movement_pattern(db_session)
+        mg = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        create_test_exercise(db_session, "bench", mg, mp, equipment_type="barbell")
+
+        profile = create_test_user_profile(db_session, training_split="full_body")
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        assert len(plan.exercises) > 0
+        serialized = [asdict(ex) for ex in plan.exercises]
+        for item in serialized:
+            assert "target_rpe" in item
+            expected_rpe = (mock_science_config.ml.rpe_easy_threshold + mock_science_config.ml.rpe_hard_threshold) / 2.0
+            assert item["target_rpe"] == pytest.approx(expected_rpe)
+
+
 # ─── Rotation Tests ────────────────────────────────────────────────────────────
 
 class TestRotation:

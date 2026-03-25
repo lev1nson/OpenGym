@@ -221,7 +221,6 @@ class AdaptationEngine:
             anomaly_flag = False
             ml_weight_kg: float | None = None
             target_reps = core_target_reps
-            final_weight_before_recovery = core_weight_kg
 
             # Check rpe_predictions table first (populated by MLWorker async)
             db_prediction = _get_latest_db_prediction(
@@ -255,7 +254,6 @@ class AdaptationEngine:
                     )
                 else:
                     used_ml = True
-                    final_weight_before_recovery = ml_weight_kg
                     source_label = _format_ai_source_label(
                         ml_weight_kg=ml_weight_kg,
                         core_weight_kg=core_weight_kg,
@@ -311,7 +309,6 @@ class AdaptationEngine:
                         )
                     else:
                         used_ml = True
-                        final_weight_before_recovery = ml_weight_kg
                         source_label = _format_ai_source_label(
                             ml_weight_kg=ml_weight_kg,
                             core_weight_kg=core_weight_kg,
@@ -337,8 +334,10 @@ class AdaptationEngine:
                 )
                 source_label = "[ядро]"
 
+            base_weight_after_recovery = core_weight_kg * recovery_coeff
+            ml_delta = (ml_weight_kg - core_weight_kg) if used_ml else 0.0
             new_weight = round_to_equipment_increment(
-                final_weight_before_recovery * recovery_coeff,
+                base_weight_after_recovery + ml_delta,
                 equipment_type,
                 science,
             )

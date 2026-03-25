@@ -2,6 +2,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+
+
+class PlannerEventType(str, Enum):
+    PAIN_REPORT = "pain_report"
+    READINESS_OVERRIDE = "readiness_override"
+    SKIPPED_SESSION = "skipped_session"
+    PERFORMANCE_FEEDBACK = "performance_feedback"
+    PREFERENCE_REQUEST = "preference_request"
+
+
+@dataclass
+class PlannerEvent:
+    event_type: PlannerEventType
+    timestamp: datetime
+    athlete_id: int
+    data: dict
 
 
 @dataclass(slots=True)

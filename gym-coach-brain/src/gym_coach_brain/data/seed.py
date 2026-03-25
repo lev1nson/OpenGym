@@ -256,6 +256,59 @@ def seed_equipment(session: Session) -> int:
     return inserted
 
 
+_EXERCISE_CONCRETE_INVENTORY: dict[str, str] = {
+    "Bench Press": "barbell",
+    "Incline Dumbbell Press": "dumbbells",
+    "Dumbbell Fly": "dumbbells",
+    "Machine Chest Press": "chest_press_machine",
+    "Machine Shoulder Press": "shoulder_press_machine",
+    "Smith Squat": "smith_machine",
+    "Machine Leg Curl": "leg_curl_machine",
+    "Machine Leg Extension": "leg_extension_machine",
+    "Leg Press": "leg_press_machine",
+    "Lat Pulldown": "high_pulley_cable",
+    "Tricep Pushdown": "high_pulley_cable",
+    "Cable Row": "low_pulley_cable",
+    "Cable Pull-Through": "low_pulley_cable",
+    "Overhead Press": "barbell",
+    "Barbell Row": "barbell",
+    "Barbell Squat": "barbell",
+    "Romanian Deadlift": "barbell",
+    "Deadlift": "barbell",
+    "Good Morning": "barbell",
+    "Hip Thrust": "barbell",
+    "Dumbbell Shoulder Press": "dumbbells",
+    "Dumbbell Row": "dumbbells",
+    "Dumbbell Curl": "dumbbells",
+    "Lateral Raise": "dumbbells",
+    "Farmer's Walk": "dumbbells",
+    "Bulgarian Split Squat": "dumbbells",
+    "Ab Wheel Rollout": "ab_wheel",
+}
+
+
+def _derive_exercise_family(
+    movement_pattern: str,
+    equipment_type: str,
+    is_compound: bool,
+) -> str:
+    load_mode = "compound" if is_compound else "isolation"
+
+    if equipment_type in ("cable", "machine"):
+        equipment_suffix = "guided"
+    elif equipment_type in ("pullup_bar", "dips_bar"):
+        equipment_suffix = "bodyweight_station"
+    elif equipment_type == "resistance_band":
+        equipment_suffix = "band"
+    else:
+        equipment_suffix = equipment_type
+
+    if movement_pattern == "carry":
+        return f"carry_{equipment_suffix}"
+
+    return f"{load_mode}_{movement_pattern}_{equipment_suffix}"
+
+
 def seed_exercises(session: Session) -> int:
     """Insert new exercises and fill secondary_muscle_ids where empty.
 
@@ -266,6 +319,8 @@ def seed_exercises(session: Session) -> int:
 
     Returns count of exercises inserted + updated.
     """
+    from gym_coach_brain.data.models import MovementPattern
+
     mg_ids = {mg.name: mg.id for mg in session.query(MuscleGroup).all()}
     mp_ids = {mp.name: mp.id for mp in session.query(MovementPattern).all()}
 
@@ -275,6 +330,10 @@ def seed_exercises(session: Session) -> int:
         primary_mp_id = mp_ids[primary_mp]
         secondary_ids = [mg_ids[m] for m in secondary_mgs]
         secondary_json = json.dumps(secondary_ids)
+
+        concrete_item = _EXERCISE_CONCRETE_INVENTORY.get(name)
+        requires_concrete = concrete_item is not None and equip != "bodyweight"
+        exercise_family = _derive_exercise_family(primary_mp, equip, is_compound)
 
         existing = session.query(Exercise).filter_by(name=name).first()
         if existing is None:
@@ -286,19 +345,28 @@ def seed_exercises(session: Session) -> int:
                 is_compound=is_compound,
                 stretch_mediated=stretch,
                 equipment_type=equip,
+                exercise_family=exercise_family,
+                requires_concrete_inventory=requires_concrete,
+                concrete_item_id=concrete_item,
             ))
             touched += 1
         elif existing.secondary_muscle_ids == "[]" and (
-            secondary_json != "[]" or 
-            existing.movement_pattern_id != primary_mp_id or 
+            secondary_json != "[]" or
+            existing.movement_pattern_id != primary_mp_id or
             existing.primary_muscle_id != primary_mg_id
         ):
-            # Backfill secondary muscles, movement pattern, and correct primary muscle
             existing.secondary_muscle_ids = secondary_json
             existing.movement_pattern_id = primary_mp_id
             existing.primary_muscle_id = primary_mg_id
+            existing.exercise_family = exercise_family
+            existing.requires_concrete_inventory = requires_concrete
+            existing.concrete_item_id = concrete_item
             touched += 1
-        # else: already has secondary_muscle_ids — skip
+        elif existing.exercise_family is None:
+            existing.exercise_family = exercise_family
+            existing.requires_concrete_inventory = requires_concrete
+            existing.concrete_item_id = concrete_item
+            touched += 1
 
     session.flush()
     return touched

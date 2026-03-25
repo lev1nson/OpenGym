@@ -119,8 +119,10 @@ def apply_seed_data(conn):
         conn.execute(text("""
             INSERT INTO exercises
                 (name, primary_muscle_id, movement_pattern_id,
-                 secondary_muscle_ids, is_compound, stretch_mediated, equipment_type)
-            SELECT :name, :mg_id, :mp_id, :sec, :compound, :stretch, :equip
+                 secondary_muscle_ids, is_compound, stretch_mediated, equipment_type,
+                 exercise_family, requires_concrete_inventory, concrete_item_id)
+            SELECT :name, :mg_id, :mp_id, :sec, :compound, :stretch, :equip,
+                   NULL, 0, NULL
             WHERE NOT EXISTS (SELECT 1 FROM exercises WHERE name=:name)
         """), {
             "name": name, "mg_id": mg_ids[mg_name], "mp_id": mp_ids[mp_name],

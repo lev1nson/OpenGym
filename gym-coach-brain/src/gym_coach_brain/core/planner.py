@@ -5,6 +5,9 @@ Implements the science-driven exercise selection, split-day rotation,
 detraining detection, recovery signal scaling, PUOS validation,
 and antagonist balance checks.
 
+Supports both legacy muscle-group-first planning and the new slot-based
+architecture for improved adaptability and ML integration.
+
 References:
     [Source: _bmad-output/planning-artifacts/epics/epic-4.md#Story 4.7]
     [Source: _bmad-output/planning-artifacts/architecture.md#FR5]
@@ -39,6 +42,10 @@ class PlannedExercise:
     sets: int
     rep_range: tuple[int, int]
     target_weight_kg: float
+    target_rpe: float | None = None
+    slot_id: str | None = None
+    selection_reason: str | None = None
+    primary_muscle_name: str | None = None
 
 
 @dataclass
@@ -49,6 +56,7 @@ class WorkoutPlan:
     exercises: list[PlannedExercise]
     skipped_groups: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    planning_trace: list[dict] = field(default_factory=list)
 
 
 # ─── Split-Day Constants ───────────────────────────────────────────────────────
@@ -229,6 +237,7 @@ class WorkoutPlanner:
                     sets=sets,
                     rep_range=rep_range,
                     target_weight_kg=rounded_weight,
+                    target_rpe=(science.ml.rpe_easy_threshold + science.ml.rpe_hard_threshold) / 2.0,
                 )
             )
 
@@ -728,6 +737,7 @@ class WorkoutPlanner:
                                 sets=exercises[max_idx].sets - 1,
                                 rep_range=exercises[max_idx].rep_range,
                                 target_weight_kg=exercises[max_idx].target_weight_kg,
+                                target_rpe=exercises[max_idx].target_rpe,
                             )
                     else:
                         break  # Stop reduction if we can't find any contributor
@@ -863,3 +873,70 @@ class WorkoutPlanner:
             query = query.filter(WorkoutSession.session_date > last_deload[0])
 
         return query.count()
+
+    # ─── Slot-Based Planner ────────────────────────────────────────────────────
+
+    def generate_slot_based(
+        self,
+        user_profile: "UserProfile",
+        science: "ScienceConfig",
+        db_session: "SASession",
+        recovery_signal: "RecoverySignal | None" = None,
+        _today: "date | None" = None,
+        forced_split_day_label: str | None = None,
+    ) -> WorkoutPlan:
+        """Generate workout plan using slot-based architecture.
+
+        Delegates to SlotPlannerEngine for the slot-first planning logic.
+        """
+        from gym_coach_brain.core.planner_slot_engine import SlotPlannerEngine
+        from gym_coach_brain.core.planner_slots import get_day_template
+        from gym_coach_brain.data.models import WorkoutSession
+
+        today = _today if _today is not None else date.today()
+
+        last_session: WorkoutSession | None = (
+            db_session.query(WorkoutSession)
+            .filter(WorkoutSession.status == "completed")
+            .order_by(WorkoutSession.session_date.desc())
+            .first()
+        )
+
+        if forced_split_day_label is not None:
+            split_label = forced_split_day_label
+        else:
+            split_label, _ = self._determine_split_day(user_profile, last_session, db_session)
+
+        template = get_day_template(user_profile.training_split, split_label)
+        if template is None:
+            return self.generate(user_profile, science, db_session, recovery_signal, _today, forced_split_day_label)
+
+        engine = SlotPlannerEngine()
+        result = engine.plan(
+            user_profile=user_profile,
+            science=science,
+            db_session=db_session,
+            recovery_signal=recovery_signal,
+            _today=today,
+            forced_split_day_label=split_label,
+        )
+
+        if result.planned_exercises:
+            balance_warning = self._check_antagonist_balance(result.planned_exercises, db_session)
+            if balance_warning:
+                result.warnings.append(balance_warning)
+
+        muscle_groups_today = [
+            pe.primary_muscle_name or ""
+            for pe in result.planned_exercises
+            if pe.primary_muscle_name
+        ]
+
+        return WorkoutPlan(
+            muscle_groups_today=muscle_groups_today,
+            split_day_label=split_label,
+            exercises=result.planned_exercises,
+            skipped_groups=[],
+            warnings=result.warnings,
+            planning_trace=result.planning_trace,
+        )
