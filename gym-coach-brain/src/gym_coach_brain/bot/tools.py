@@ -22,6 +22,50 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "profile_show",
+            "description": "Get the current athlete profile and onboarding status before deciding whether to continue onboarding or start workouts.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "onboarding_start",
+            "description": "Start or resume onboarding. Use reset=true only if the athlete explicitly asks to restart onboarding from scratch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reset": {"type": "boolean"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "onboarding_answer",
+            "description": "Save one onboarding answer. The athlete may answer freely; normalize to the backend-supported value for the current question before calling this tool.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question_id": {"type": "string"},
+                    "answer": {"type": "string"},
+                },
+                "required": ["question_id", "answer"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "onboarding_complete",
+            "description": "Finalize onboarding after all onboarding questions have been answered.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "workout_start",
             "description": "Start today's workout after deterministic readiness flow is complete.",
             "parameters": {
@@ -241,6 +285,23 @@ class ToolExecutor:
         return payload
 
     def _build_intent_argv(self, tool_name: str, arguments: dict[str, Any]) -> list[str]:
+        if tool_name == "profile_show":
+            return []
+        if tool_name == "onboarding_start":
+            argv = []
+            if arguments.get("reset"):
+                argv.append("--reset")
+            return argv
+        if tool_name == "onboarding_answer":
+            self._require_keys(tool_name, arguments, ["question_id", "answer"])
+            return [
+                "--question",
+                str(arguments["question_id"]),
+                "--answer",
+                str(arguments["answer"]),
+            ]
+        if tool_name == "onboarding_complete":
+            return []
         if tool_name == "workout_start":
             argv: list[str] = []
             if arguments.get("sleep_hours") is not None:
@@ -363,6 +424,34 @@ class ToolExecutor:
 
 def apply_result_to_state(state: UserState, result: ToolExecutionResult) -> None:
     """Merge tool execution metadata back into the shared user state."""
+    if result.data and "profile_exists" in result.data:
+        state.profile_exists = bool(result.data["profile_exists"])
+
+    if result.data and "onboarding_status" in result.data:
+        state.onboarding_status = str(result.data["onboarding_status"])
+
+    if result.data and "current_question_id" in result.data:
+        value = result.data["current_question_id"]
+        state.current_onboarding_question_id = value if isinstance(value, str) else None
+        state.pending_onboarding = state.current_onboarding_question_id is not None
+        if state.current_onboarding_question_id is None and state.onboarding_status == "ready_to_complete":
+            state.current_stage = "onboarding_review"
+
+    if result.data and result.data.get("onboarding_complete") is True:
+        state.complete_onboarding()
+    elif result.data and result.data.get("onboarding_status") == "completed":
+        state.complete_onboarding()
+
+    if result.name == "onboarding_start" and result.exit_code == 0:
+        state.start_onboarding(state.current_onboarding_question_id)
+    elif result.name == "onboarding_answer" and result.exit_code == 0:
+        if bool(result.data and result.data.get("onboarding_ready_to_complete")):
+            state.advance_onboarding(None)
+        else:
+            state.advance_onboarding(state.current_onboarding_question_id)
+    elif result.name == "onboarding_complete" and result.exit_code == 0:
+        state.complete_onboarding()
+
     if result.data and "session_id" in result.data:
         # Do not overwrite active_session_id from a rejected workout_start: the backend
         # returns the *existing* completed session_id in its rejection payload (exit_code=1).

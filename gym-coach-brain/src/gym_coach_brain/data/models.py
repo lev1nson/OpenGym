@@ -113,6 +113,8 @@ class UserProfile(Base):
     )
     training_days_per_week = Column(Integer, nullable=False, default=3)
     onboarding_complete = Column(Boolean, nullable=False, default=False)
+    onboarding_status = Column(String, nullable=False, default="not_started")
+    onboarding_current_question_id = Column(String, nullable=True)
     created_at = Column(
         String, nullable=False,
         server_default=text("strftime('%Y-%m-%dT%H:%M:%S', 'now')"),

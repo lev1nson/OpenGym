@@ -424,6 +424,54 @@ class TestRecoverySignal:
         assert plan.exercises[0].target_weight_kg == pytest.approx(80.0, abs=2.5)
 
 
+# ─── Initial Weight Baseline Tests ────────────────────────────────────────────
+
+class TestInitialWeightBaseline:
+    def test_pullup_bar_new_exercise_uses_zero_external_load(self, db_session, mock_science_config):
+        """Bodyweight-family exercises should not inherit an external pattern load."""
+        mp = create_test_movement_pattern(db_session, name="vertical_pull")
+        mg = create_test_muscle_group(db_session, "back", body_region="upper", is_pull=True)
+        create_test_exercise(db_session, "Pull-up", mg, mp, equipment_type="pullup_bar")
+
+        profile = create_test_user_profile(
+            db_session,
+            training_split="full_body",
+            equipment=["pullup_bar"],
+        )
+        profile.initial_weight_coefficients = json.dumps({"vertical_pull": 30.0})
+        db_session.flush()
+
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        assert len(plan.exercises) == 1
+        assert plan.exercises[0].target_weight_kg == pytest.approx(0.0)
+
+    def test_dumbbell_new_exercise_uses_per_hand_modifier(self, db_session, mock_science_config):
+        """Dumbbell starters should be reduced relative to the movement baseline."""
+        mp = create_test_movement_pattern(db_session, name="horizontal_push")
+        mg = create_test_muscle_group(db_session, "chest", body_region="upper", is_push=True)
+        create_test_exercise(
+            db_session,
+            "Incline Dumbbell Press",
+            mg,
+            mp,
+            equipment_type="dumbbell",
+        )
+
+        profile = create_test_user_profile(
+            db_session,
+            training_split="full_body",
+            equipment=["dumbbell"],
+        )
+        profile.initial_weight_coefficients = json.dumps({"horizontal_push": 28.0})
+        db_session.flush()
+
+        plan = WorkoutPlanner().generate(profile, mock_science_config, db_session)
+
+        assert len(plan.exercises) == 1
+        assert plan.exercises[0].target_weight_kg == pytest.approx(14.0)
+
+
 # ─── Equipment Filter Tests ────────────────────────────────────────────────────
 
 class TestEquipmentFilter:

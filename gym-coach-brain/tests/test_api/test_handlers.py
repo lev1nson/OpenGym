@@ -231,22 +231,22 @@ def mock_science():
     )
     cfg.__dict__["initial_weight_table"] = {
         "beginner": {
-            "horizontal_push": 0.40,
-            "vertical_push": 0.30,
-            "horizontal_pull": 0.35,
-            "vertical_pull": 0.30,
-            "squat": 0.60,
-            "hinge": 0.50,
-            "carry": 0.25,
+            "horizontal_push": 0.25,
+            "vertical_push": 0.18,
+            "horizontal_pull": 0.22,
+            "vertical_pull": 0.20,
+            "squat": 0.40,
+            "hinge": 0.35,
+            "carry": 0.20,
         },
         "intermediate": {
-            "horizontal_push": 0.70,
-            "vertical_push": 0.55,
-            "horizontal_pull": 0.60,
-            "vertical_pull": 0.55,
-            "squat": 1.00,
-            "hinge": 0.90,
-            "carry": 0.45,
+            "horizontal_push": 0.35,
+            "vertical_push": 0.25,
+            "horizontal_pull": 0.30,
+            "vertical_pull": 0.28,
+            "squat": 0.50,
+            "hinge": 0.45,
+            "carry": 0.25,
         },
     }
     return cfg
@@ -260,6 +260,10 @@ def test_onboarding_start_returns_first_question(onboarding_session, mock_scienc
     stdout, exit_code = handle_onboarding_start([], onboarding_session, mock_science)
     assert exit_code == 0
     assert "Вопрос 1/" in stdout
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    assert profile.onboarding_status == "in_progress"
+    assert profile.onboarding_current_question_id == "age"
 
 
 def test_onboarding_start_with_existing_complete_profile_warns(onboarding_session, mock_science):
@@ -287,6 +291,10 @@ def test_onboarding_start_reset_creates_new_profile(onboarding_session, mock_sci
 
 def test_onboarding_answer_bodyweight(onboarding_session, mock_science):
     handle_onboarding_start([], onboarding_session, mock_science)
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    profile.onboarding_current_question_id = "bodyweight_kg"
+    onboarding_session.flush()
 
     stdout, exit_code = handle_onboarding_answer(
         ["--question", "bodyweight_kg", "--answer", "75"],
@@ -301,6 +309,10 @@ def test_onboarding_answer_bodyweight(onboarding_session, mock_science):
 
 def test_onboarding_answer_training_split(onboarding_session, mock_science):
     handle_onboarding_start([], onboarding_session, mock_science)
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    profile.onboarding_current_question_id = "training_split"
+    onboarding_session.flush()
 
     stdout, exit_code = handle_onboarding_answer(
         ["--question", "training_split", "--answer", "full_body"],
@@ -326,6 +338,10 @@ def test_onboarding_answer_invalid_question_id(onboarding_session, mock_science)
 
 def test_onboarding_answer_invalid_split_value(onboarding_session, mock_science):
     handle_onboarding_start([], onboarding_session, mock_science)
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    profile.onboarding_current_question_id = "training_split"
+    onboarding_session.flush()
 
     stdout, exit_code = handle_onboarding_answer(
         ["--question", "training_split", "--answer", "invalid"],
@@ -335,13 +351,36 @@ def test_onboarding_answer_invalid_split_value(onboarding_session, mock_science)
     assert exit_code == 1
 
 
+def test_onboarding_answer_invalid_experience_level_value(onboarding_session, mock_science):
+    handle_onboarding_start([], onboarding_session, mock_science)
+    profile = onboarding_session.query(UserProfile).first()
+    assert profile is not None
+    profile.onboarding_current_question_id = "experience_level"
+    onboarding_session.flush()
+
+    stdout, exit_code = handle_onboarding_answer(
+        ["--question", "experience_level", "--answer", "novice"],
+        onboarding_session,
+        mock_science,
+    )
+    assert exit_code == 1
+
+
 def _setup_profile_for_complete(session, science, bodyweight=70.0, experience="intermediate"):
     handle_onboarding_start([], session, science)
-    handle_onboarding_answer(["--question", "bodyweight_kg", "--answer", str(bodyweight)], session, science)
-    handle_onboarding_answer(["--question", "experience_level", "--answer", experience], session, science)
-    handle_onboarding_answer(["--question", "training_split", "--answer", "full_body"], session, science)
-    handle_onboarding_answer(["--question", "training_days_per_week", "--answer", "4"], session, science)
-    handle_onboarding_answer(["--question", "equipment", "--answer", "bodyweight"], session, science)
+    answer_flow = [
+        ("age", "29"),
+        ("experience_level", experience),
+        ("goal", "hypertrophy"),
+        ("bodyweight_kg", str(bodyweight)),
+        ("equipment", "bodyweight"),
+        ("training_days_per_week", "4"),
+        ("training_split", "full_body"),
+        ("sleep_quality", "good"),
+        ("stress_level", "low"),
+    ]
+    for question_id, answer in answer_flow:
+        handle_onboarding_answer(["--question", question_id, "--answer", answer], session, science)
 
 
 def test_onboarding_complete_computes_weights(onboarding_session, mock_science):
@@ -353,8 +392,9 @@ def test_onboarding_complete_computes_weights(onboarding_session, mock_science):
     profile = onboarding_session.query(UserProfile).first()
     assert profile is not None
     assert profile.onboarding_complete is True
+    assert profile.onboarding_status == "completed"
     weights = json.loads(profile.initial_weight_coefficients or "{}")
-    assert weights.get("squat") == pytest.approx(80.0, rel=1e-2)
+    assert weights.get("squat") == pytest.approx(40.0, rel=1e-2)
 
 
 def test_onboarding_complete_without_bodyweight_fails(onboarding_session, mock_science):

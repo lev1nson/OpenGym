@@ -215,3 +215,67 @@ async def test_e2e_checkin_event_triggers_workout_start(tmp_path: Path) -> None:
     initial_user_msg = llm.calls[0][2]
     assert initial_user_msg["role"] == "user"
     assert "завершён" in initial_user_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_e2e_freeform_first_message_routes_into_onboarding_tools(tmp_path: Path) -> None:
+    bus = MessageBus()
+    llm = SequencedLLMClient(
+        [
+            LLMResponse(
+                content=None,
+                tool_calls=[LLMToolCall(id="1", name="profile_show", arguments="{}")],
+            ),
+            LLMResponse(
+                content=None,
+                tool_calls=[LLMToolCall(id="2", name="onboarding_start", arguments="{}")],
+            ),
+            LLMResponse(
+                content="Привет. Давай начнём с короткого онбординга. Сколько тебе лет?",
+                tool_calls=[],
+            ),
+        ]
+    )
+    tool_executor = SequencedToolExecutor(
+        [
+            ToolExecutionResult(
+                name="profile_show",
+                intent="profile_show",
+                exit_code=1,
+                stdout="Профиль не найден. Запустите onboarding_start для создания профиля.",
+                argv=[],
+                data=None,
+            ),
+            ToolExecutionResult(
+                name="onboarding_start",
+                intent="onboarding_start",
+                exit_code=0,
+                stdout="Вопрос 1/9: Сколько вам лет? (диапазон: 10-100)",
+                argv=[],
+                data={
+                    "profile_exists": True,
+                    "onboarding_complete": False,
+                    "onboarding_status": "in_progress",
+                    "current_question_id": "age",
+                    "next_question_id": "experience_level",
+                    "onboarding_ready_to_complete": False,
+                },
+            ),
+        ]
+    )
+    loop = AgentLoop(
+        bus=bus,
+        llm_client=llm,
+        tool_executor=tool_executor,
+        prompt_path=_prompt_file(tmp_path),
+    )
+    state = UserState()
+
+    await bus.publish_inbound(InboundMessage(user_id="athlete", text="привет"))
+    outbound = await loop.run_once(state)
+
+    assert "онбординга" in outbound.text
+    assert tool_executor.calls == ["profile_show", "onboarding_start"]
+    assert state.profile_exists is True
+    assert state.onboarding_status == "in_progress"
+    assert state.current_onboarding_question_id == "age"

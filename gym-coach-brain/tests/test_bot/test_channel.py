@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from aiogram.types import CallbackQuery, Message
 
-from gym_coach_brain.bot.bus import MessageBus
+from gym_coach_brain.bot.bus import MessageBus, OutboundEvent
 from gym_coach_brain.bot.channels.base import ButtonSpec, TransportMessage
 from gym_coach_brain.bot.channels.telegram import (
     BackendResult,
@@ -37,6 +37,96 @@ class FakeBackend:
         self.start_calls: list[tuple[float, int]] = []
         self.status_calls = 0
         self.post_calls: list[tuple[int, int]] = []
+        self.profile_exists = False
+        self.onboarding_complete = False
+        self.onboarding_questions = [
+            "age",
+            "experience_level",
+            "goal",
+            "bodyweight_kg",
+            "equipment",
+            "training_days_per_week",
+            "training_split",
+            "sleep_quality",
+            "stress_level",
+        ]
+        self.onboarding_answers: list[tuple[str, str]] = []
+        self.onboarding_start_calls = 0
+        self.onboarding_complete_calls = 0
+
+    async def get_profile_status(self) -> BackendResult:
+        if not self.profile_exists:
+            return BackendResult(
+                stdout="Профиль не найден. Запустите onboarding_start для создания профиля.",
+                exit_code=1,
+                data={},
+            )
+        return BackendResult(
+            stdout="Профиль найден",
+            exit_code=0,
+            data={
+                "profile_exists": True,
+                "onboarding_complete": self.onboarding_complete,
+            },
+        )
+
+    async def start_onboarding(self, *, reset: bool = False) -> BackendResult:
+        self.onboarding_start_calls += 1
+        self.profile_exists = True
+        self.onboarding_complete = False
+        if reset:
+            self.onboarding_answers.clear()
+        return BackendResult(
+            stdout="Вопрос 1/9: Сколько вам лет? (диапазон: 10-100)",
+            exit_code=0,
+            data={
+                "current_question_id": self.onboarding_questions[0],
+                "next_question_id": self.onboarding_questions[1],
+                "onboarding_complete": False,
+                "onboarding_ready_to_complete": False,
+            },
+        )
+
+    async def answer_onboarding(
+        self,
+        *,
+        question_id: str,
+        answer: str,
+    ) -> BackendResult:
+        self.onboarding_answers.append((question_id, answer))
+        current_index = self.onboarding_questions.index(question_id)
+        next_index = current_index + 1
+        if next_index < len(self.onboarding_questions):
+            return BackendResult(
+                stdout=f"Вопрос {next_index + 1}/9: next",
+                exit_code=0,
+                data={
+                    "current_question_id": question_id,
+                    "next_question_id": self.onboarding_questions[next_index],
+                    "onboarding_complete": False,
+                    "onboarding_ready_to_complete": False,
+                },
+            )
+        return BackendResult(
+            stdout="Все ответы приняты. Запустите onboarding_complete для завершения.",
+            exit_code=0,
+            data={
+                "current_question_id": question_id,
+                "next_question_id": None,
+                "onboarding_complete": False,
+                "onboarding_ready_to_complete": True,
+            },
+        )
+
+    async def complete_onboarding(self) -> BackendResult:
+        self.onboarding_complete_calls += 1
+        self.profile_exists = True
+        self.onboarding_complete = True
+        return BackendResult(
+            stdout="✅ Онбординг завершён!",
+            exit_code=0,
+            data={"profile_exists": True, "onboarding_complete": True},
+        )
 
     async def start_workout(
         self,
@@ -128,9 +218,74 @@ async def test_channel_normalizes_callbacks_and_renders_buttons():
 
 
 @pytest.mark.asyncio
+async def test_start_command_publishes_to_agent_bus():
+    bot = FakeBot()
+    backend = FakeBackend()
+    bus = MessageBus()
+    controller = TelegramBotController(
+        bot=bot,
+        backend=backend,
+        bus=bus,
+        state_store=InMemoryUserStateStore(),
+    )
+
+    await controller.handle_start_command(FakeMessage("/start"))
+    event = await bus.consume_inbound()
+
+    assert bot.sent_messages == []
+    assert event.kind == "user_message"
+    assert event.message.text == "/start"
+
+
+@pytest.mark.asyncio
+async def test_first_text_goes_to_agent_bus_without_transport_onboarding_gate():
+    bot = FakeBot()
+    backend = FakeBackend()
+    bus = MessageBus()
+    controller = TelegramBotController(
+        bot=bot,
+        backend=backend,
+        bus=bus,
+        state_store=InMemoryUserStateStore(),
+    )
+
+    await controller.handle_text_message(FakeMessage("привет"))
+    event = await bus.consume_inbound()
+
+    assert bot.sent_messages == []
+    assert event.kind == "user_message"
+    assert event.message.text == "привет"
+
+
+@pytest.mark.asyncio
+async def test_outbound_loop_delivers_agent_reply_back_to_same_chat():
+    bot = FakeBot()
+    backend = FakeBackend()
+    bus = MessageBus()
+    controller = TelegramBotController(
+        bot=bot,
+        backend=backend,
+        bus=bus,
+        state_store=InMemoryUserStateStore(),
+    )
+
+    await controller.handle_text_message(FakeMessage("привет", user_id=42, chat_id=99))
+    outbound_task = asyncio.create_task(controller.run_outbound_loop())
+    await bus.publish_outbound(OutboundEvent(user_id="42", text="Привет. Чем помочь?"))
+    await asyncio.sleep(0)
+    outbound_task.cancel()
+    await asyncio.gather(outbound_task, return_exceptions=True)
+
+    assert bot.sent_messages[-1]["chat_id"] == 99
+    assert bot.sent_messages[-1]["text"] == "Привет. Чем помочь?"
+
+
+@pytest.mark.asyncio
 async def test_workout_flow_advances_sleep_to_readiness_and_publishes_handoff():
     bot = FakeBot()
     backend = FakeBackend()
+    backend.profile_exists = True
+    backend.onboarding_complete = True
     bus = MessageBus()
     state_store = InMemoryUserStateStore()
     controller = TelegramBotController(
@@ -166,6 +321,8 @@ async def test_workout_flow_advances_sleep_to_readiness_and_publishes_handoff():
 async def test_pending_text_repeats_keyboard_and_does_not_publish_bus_event():
     bot = FakeBot()
     backend = FakeBackend()
+    backend.profile_exists = True
+    backend.onboarding_complete = True
     bus = MessageBus()
     controller = TelegramBotController(
         bot=bot,
@@ -189,6 +346,8 @@ async def test_pending_text_repeats_keyboard_and_does_not_publish_bus_event():
 async def test_post_checkin_uses_backend_seam_without_direct_db_access():
     bot = FakeBot()
     backend = FakeBackend()
+    backend.profile_exists = True
+    backend.onboarding_complete = True
     bus = MessageBus()
     state_store = InMemoryUserStateStore()
     controller = TelegramBotController(
@@ -217,6 +376,8 @@ async def test_post_checkin_uses_backend_seam_without_direct_db_access():
 async def test_status_and_stop_commands_use_backend_and_only_clear_local_state():
     bot = FakeBot()
     backend = FakeBackend()
+    backend.profile_exists = True
+    backend.onboarding_complete = True
     state_store = InMemoryUserStateStore()
     controller = TelegramBotController(
         bot=bot,

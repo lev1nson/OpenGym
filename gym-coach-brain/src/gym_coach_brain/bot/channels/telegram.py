@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
+import tempfile
 from typing import Protocol, Sequence
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from loguru import logger
 
-from gym_coach_brain.bot.bus import InboundEvent, MessageBus
+from gym_coach_brain.bot.bus import InboundEvent, MessageBus, OutboundEvent, OutboundMessage
 from gym_coach_brain.bot.channels.base import BaseChannel, ButtonSpec, TransportMessage
-from gym_coach_brain.bot.state import InMemoryUserStateStore, UserState
+from gym_coach_brain.bot.speech import WhisperTranscriber, cleanup_audio_file, download_telegram_voice
+from gym_coach_brain.bot.state import UserState, UserStateStore
 
 SLEEP_OPTIONS = (5.0, 6.5, 7.5, 9.0)
 READINESS_OPTIONS = (2, 5, 9)
@@ -156,19 +160,38 @@ class TelegramBotController:
         bot: SupportsSendMessage,
         backend: BackendClient,
         bus: MessageBus,
-        state_store: InMemoryUserStateStore,
+        state_store: UserStateStore,
+        transcriber: WhisperTranscriber | None = None,
     ) -> None:
         self._bot = bot
         self._backend = backend
         self._bus = bus
         self._state_store = state_store
+        self._transcriber = transcriber
         self._inboxes: dict[str, asyncio.Queue[TransportMessage]] = {}
+        self._chat_ids: dict[str, int] = {}
         self.router = Router(name="telegram-bot")
+        self.router.message.register(self.handle_start_command, Command("start"))
         self.router.message.register(self.handle_workout_command, Command("workout"))
         self.router.message.register(self.handle_status_command, Command("status"))
         self.router.message.register(self.handle_stop_command, Command("stop"))
         self.router.callback_query.register(self.handle_callback_query)
+        # Register voice message handler before text handler (more specific)
+        self.router.message.register(self.handle_voice_message, lambda m: m.voice is not None)
         self.router.message.register(self.handle_text_message)
+
+    async def handle_start_command(self, message: Message) -> None:
+        channel = self._channel_from_message(message)
+        state = self._state(channel.user_id)
+        normalized = await channel.ingest_text(message.text or "/start")
+        await self._bus.publish_inbound(
+            InboundEvent(
+                kind="user_message",
+                user_id=channel.user_id,
+                message=normalized,
+                active_session_id=state.active_session_id,
+            )
+        )
 
     async def handle_workout_command(self, message: Message) -> None:
         channel = self._channel_from_message(message)
@@ -203,7 +226,7 @@ class TelegramBotController:
 
         channel = self._channel_from_message(message)
         normalized = await channel.ingest_text(text)
-        if normalized.command in {"workout", "status", "stop"}:
+        if normalized.command in {"start", "workout", "status", "stop"}:
             return
 
         state = self._state(channel.user_id)
@@ -225,6 +248,90 @@ class TelegramBotController:
                 active_session_id=state.active_session_id,
             )
         )
+
+    async def handle_voice_message(self, message: Message) -> None:
+        """Handle voice messages by transcribing them and processing as text."""
+        if not message.voice:
+            return
+
+        channel = self._channel_from_message(message)
+        state = self._state(channel.user_id)
+
+        # Check if transcriber is available
+        if not self._transcriber:
+            logger.warning("Voice message received but transcriber not configured")
+            await channel.send(
+                "Голосовые сообщения временно недоступны. Пожалуйста, отправь текстом."
+            )
+            return
+
+        # Notify user that we're processing
+        await channel.send("🎤 Обрабатываю голосовое сообщение...")
+
+        temp_file: Path | None = None
+        try:
+            # Download voice file to temporary location
+            temp_dir = Path(tempfile.gettempdir()) / "gym_coach_voice"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_file = temp_dir / f"voice_{message.voice.file_id}.ogg"
+
+            await download_telegram_voice(
+                bot=self._bot,
+                file_id=message.voice.file_id,
+                destination=temp_file,
+            )
+
+            # Transcribe the audio
+            transcribed_text = await self._transcriber.transcribe_with_fallback(
+                audio_file=temp_file,
+                fallback_message="Не удалось распознать голосовое сообщение. Попробуй ещё раз или отправь текстом.",
+            )
+
+            logger.info(
+                "Transcribed voice message from user {}: {}",
+                channel.user_id,
+                transcribed_text[:100],
+            )
+
+            # If transcription failed (returned fallback), send error and return
+            if transcribed_text.startswith("Не удалось распознать"):
+                await channel.send(transcribed_text)
+                return
+
+            # Process transcribed text through normal flow
+            normalized = await channel.ingest_text(transcribed_text)
+
+            # Check for deterministic flow states
+            if state.pending_checkin_sleep:
+                await self._send_sleep_prompt(channel)
+                return
+            if state.pending_checkin_readiness:
+                await self._send_readiness_prompt(channel)
+                return
+            if state.pending_postcheckin:
+                await self._send_post_checkin_prompt(channel)
+                return
+
+            # Send to agent loop
+            await self._bus.publish_inbound(
+                InboundEvent(
+                    kind="user_message",
+                    user_id=channel.user_id,
+                    message=normalized,
+                    active_session_id=state.active_session_id,
+                )
+            )
+
+        except Exception as e:
+            logger.error("Failed to process voice message: {}", e)
+            await channel.send(
+                "Произошла ошибка при обработке голосового сообщения. Попробуй ещё раз или отправь текстом."
+            )
+
+        finally:
+            # Clean up temporary file
+            if temp_file:
+                cleanup_audio_file(temp_file)
 
     async def handle_callback_query(self, callback_query: CallbackQuery) -> None:
         message = callback_query.message
@@ -353,6 +460,23 @@ class TelegramBotController:
             buttons=POST_FEELING_BUTTONS,
         )
 
+    async def run_outbound_loop(self) -> None:
+        while True:
+            event = await self._bus.consume_outbound()
+            await self._deliver_outbound(event)
+
+    async def _deliver_outbound(self, event: OutboundEvent | OutboundMessage) -> None:
+        chat_id = self._chat_ids.get(event.user_id)
+        if chat_id is None:
+            return
+
+        buttons = event.buttons if isinstance(event, OutboundEvent) else ()
+        await self._bot.send_message(
+            chat_id=chat_id,
+            text=event.text,
+            reply_markup=_build_keyboard(buttons),
+        )
+
     def _channel_from_message(
         self,
         message: Message,
@@ -360,6 +484,7 @@ class TelegramBotController:
         user_id: int | None = None,
     ) -> TelegramChannel:
         normalized_user_id = str(user_id if user_id is not None else message.from_user.id)
+        self._chat_ids[normalized_user_id] = message.chat.id
         inbox = self._inboxes.get(normalized_user_id)
         if inbox is None:
             inbox = asyncio.Queue(maxsize=1)

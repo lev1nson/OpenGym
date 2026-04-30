@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from gym_coach_brain.core.equipment_inventory import exercise_available_for_profile
+from gym_coach_brain.core.onboarding import compute_initial_weight_for_pattern
+from gym_coach_brain.data.models import EquipmentType
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session as SASession
@@ -73,6 +75,16 @@ _SUPPORT_COVERAGE_TARGETS: dict[str, float] = {
     "lower_back": 2.0,
 }
 _MAX_SUPPORT_EXERCISES_PER_SESSION: int = 2
+_INITIAL_WEIGHT_EQUIPMENT_MODIFIERS: dict[EquipmentType, float] = {
+    EquipmentType.barbell: 1.0,
+    EquipmentType.machine: 0.9,
+    EquipmentType.cable: 0.8,
+    EquipmentType.dumbbell: 0.5,
+    EquipmentType.bodyweight: 0.0,
+    EquipmentType.pullup_bar: 0.0,
+    EquipmentType.dips_bar: 0.0,
+    EquipmentType.resistance_band: 0.0,
+}
 
 
 # ─── WorkoutPlanner ───────────────────────────────────────────────────────────
@@ -565,8 +577,6 @@ class WorkoutPlanner:
         db_session: "SASession",
     ) -> float:
         """Compute raw target weight for an exercise before rounding."""
-        from gym_coach_brain.data.models import EquipmentType
-
         if exercise.equipment_type == EquipmentType.bodyweight:
             return 0.0
 
@@ -580,17 +590,15 @@ class WorkoutPlanner:
                 db_session=db_session,
             )
         else:
-            # New exercise: look up initial weight from profile
+            # New exercise: use the conservative movement baseline, then adapt it to equipment.
             initial_weights = json.loads(user_profile.initial_weight_coefficients or "{}")
             pattern_name = exercise.movement_pattern.name if exercise.movement_pattern else ""
             initial = initial_weights.get(pattern_name, 0.0)
 
             if initial == 0.0 and pattern_name and user_profile.bodyweight_kg:
-                # Fallback: compute from science table
-                exp_level = user_profile.experience_level or "beginner"
-                table = science.initial_weight_table.get(exp_level, {})
-                coeff = table.get(pattern_name, 0.0)
-                initial = (user_profile.bodyweight_kg or 0.0) * coeff
+                initial = compute_initial_weight_for_pattern(user_profile, science, pattern_name)
+
+            initial *= _INITIAL_WEIGHT_EQUIPMENT_MODIFIERS.get(exercise.equipment_type, 1.0)
 
             raw = initial
 

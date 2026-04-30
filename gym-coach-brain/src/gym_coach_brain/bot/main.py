@@ -5,11 +5,14 @@ import asyncio
 import os
 
 from aiogram import Bot, Dispatcher
+from loguru import logger
 
 from gym_coach_brain.bot.agent import AgentLoop
 from gym_coach_brain.bot.bus import MessageBus
 from gym_coach_brain.bot.channels.telegram import BackendClient, BackendResult, TelegramBotController
 from gym_coach_brain.bot.openrouter_client import OpenRouterClient
+from gym_coach_brain.bot.persistence import SQLiteUserStateStore
+from gym_coach_brain.bot.speech import WhisperTranscriber
 from gym_coach_brain.bot.state import InMemoryUserStateStore
 from gym_coach_brain.api.main import execute_intent
 from gym_coach_brain.core.science import ScienceConfig, load_science_config
@@ -46,6 +49,29 @@ class ApiBackendClient(BackendClient):
 
     async def get_workout_status(self) -> BackendResult:
         return await self._execute("workout_status", [])
+
+    async def get_profile_status(self) -> BackendResult:
+        return await self._execute("profile_show", [])
+
+    async def start_onboarding(self, *, reset: bool = False) -> BackendResult:
+        argv: list[str] = []
+        if reset:
+            argv.append("--reset")
+        return await self._execute("onboarding_start", argv)
+
+    async def answer_onboarding(
+        self,
+        *,
+        question_id: str,
+        answer: str,
+    ) -> BackendResult:
+        return await self._execute(
+            "onboarding_answer",
+            ["--question", question_id, "--answer", answer],
+        )
+
+    async def complete_onboarding(self) -> BackendResult:
+        return await self._execute("onboarding_complete", [])
 
     async def save_post_checkin(
         self,
@@ -88,14 +114,41 @@ async def run(
     science: ScienceConfig | None = None,
     openrouter_api_key: str | None = None,
     openrouter_model: str | None = None,
+    state_db_path: str | None = None,
+    use_persistent_state: bool = True,
 ) -> None:
     """Create the aiogram runtime, start the agent loop, and begin long polling."""
     resolved_token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
     if not resolved_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
 
-    state_store = InMemoryUserStateStore()
+    # Initialize state store based on configuration
+    if use_persistent_state:
+        db_path = state_db_path or os.environ.get("BOT_STATE_DB_PATH", "bot_state.db")
+        try:
+            state_store = SQLiteUserStateStore(db_path=db_path)
+            logger.info("Using persistent state storage at {}", db_path)
+        except Exception as e:
+            logger.error("Failed to initialize persistent state store: {}", e)
+            logger.warning("Falling back to in-memory state store")
+            state_store = InMemoryUserStateStore()
+    else:
+        state_store = InMemoryUserStateStore()
+        logger.info("Using in-memory state storage (data will be lost on restart)")
+
     bus = MessageBus()
+
+    # Initialize Whisper transcriber for voice messages
+    transcriber: WhisperTranscriber | None = None
+    try:
+        transcriber = WhisperTranscriber()
+        logger.info("Whisper transcriber initialized successfully")
+    except ValueError as e:
+        logger.warning("Whisper transcriber not available: {}", e)
+        logger.info("Voice messages will not be supported")
+    except Exception as e:
+        logger.error("Failed to initialize Whisper transcriber: {}", e)
+        logger.info("Voice messages will not be supported")
 
     bot = Bot(token=resolved_token)
     dispatcher = Dispatcher()
@@ -104,6 +157,7 @@ async def run(
         backend=ApiBackendClient(engine=engine, science=science),
         bus=bus,
         state_store=state_store,
+        transcriber=transcriber,
     )
     dispatcher.include_router(controller.router)
 
@@ -113,12 +167,16 @@ async def run(
     )
     agent_loop = AgentLoop(bus=bus, llm_client=llm_client)
     agent_task = asyncio.create_task(agent_loop.run_loop(state_store))
+    cleanup_task = asyncio.create_task(agent_loop.run_cleanup_loop())
+    outbound_task = asyncio.create_task(controller.run_outbound_loop())
 
     try:
         await dispatcher.start_polling(bot)
     finally:
         agent_task.cancel()
-        await asyncio.gather(agent_task, return_exceptions=True)
+        cleanup_task.cancel()
+        outbound_task.cancel()
+        await asyncio.gather(agent_task, cleanup_task, outbound_task, return_exceptions=True)
         await bot.session.close()
 
 

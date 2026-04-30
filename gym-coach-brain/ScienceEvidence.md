@@ -83,33 +83,34 @@ summary:
   rpe_fatigue_threshold: 8.0 # float — avg RPE above which athlete shows fatigue (2 RIR = hard)
 
 initial_weight_table:
-  # Starting weight coefficients by experience level and movement pattern.
-  # Formula: bodyweight_kg * coefficient → starting weight in kg
+  # Conservative starter coefficients by experience level and movement pattern.
+  # Formula: bodyweight_kg * coefficient → starter baseline in kg
+  # These values are intentionally conservative and are later adapted per exercise/equipment.
   # Keys match MovementPattern.name values from seed.py
   beginner:
-    horizontal_push: 0.40
-    vertical_push: 0.30
-    horizontal_pull: 0.35
-    vertical_pull: 0.30
-    squat: 0.60
-    hinge: 0.50
-    carry: 0.25
+    horizontal_push: 0.25
+    vertical_push: 0.18
+    horizontal_pull: 0.22
+    vertical_pull: 0.20
+    squat: 0.40
+    hinge: 0.35
+    carry: 0.20
   intermediate:
-    horizontal_push: 0.70
-    vertical_push: 0.55
-    horizontal_pull: 0.60
-    vertical_pull: 0.55
-    squat: 1.00
-    hinge: 0.90
-    carry: 0.45
+    horizontal_push: 0.35
+    vertical_push: 0.25
+    horizontal_pull: 0.30
+    vertical_pull: 0.28
+    squat: 0.50
+    hinge: 0.45
+    carry: 0.25
   advanced:
-    horizontal_push: 1.00
-    vertical_push: 0.80
-    horizontal_pull: 0.90
-    vertical_pull: 0.80
-    squat: 1.50
-    hinge: 1.30
-    carry: 0.65
+    horizontal_push: 0.50
+    vertical_push: 0.35
+    horizontal_pull: 0.42
+    vertical_pull: 0.40
+    squat: 0.70
+    hinge: 0.65
+    carry: 0.35
 ---
 
 # ScienceEvidence

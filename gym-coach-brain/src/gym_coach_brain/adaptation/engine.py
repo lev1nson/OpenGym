@@ -521,7 +521,7 @@ def _fallback_recommendation(
 ) -> tuple[float, int, str | None]:
     """Choose deterministic fallback without re-progressing when history is absent."""
     if not previous_performance.has_completed_history:
-        return planned_weight * recovery_coeff, planned_target_reps, "no completed history"
+        return planned_weight, planned_target_reps, "no completed history"
 
     new_weight, target_reps = _double_progression_recommendation(
         current_weight=previous_performance.current_weight,

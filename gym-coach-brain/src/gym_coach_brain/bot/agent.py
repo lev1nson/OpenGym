@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict, deque
+from datetime import datetime, timedelta
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -12,12 +14,13 @@ from loguru import logger
 
 from gym_coach_brain.bot.bus import InboundEvent, InboundMessage, MessageBus, OutboundEvent
 from gym_coach_brain.bot.openrouter_client import LLMClient
-from gym_coach_brain.bot.state import InMemoryUserStateStore, UserState
+from gym_coach_brain.bot.state import UserState, UserStateStore
 from gym_coach_brain.bot.tools import TOOL_SCHEMAS, ToolExecutionResult, ToolExecutor
 
 
 DEFAULT_HISTORY_TURNS = 20
 DEFAULT_MAX_ITERATIONS = 10
+DEFAULT_CONVERSATION_TIMEOUT_HOURS = 24
 ATHLETE_SAFE_FALLBACK = (
     "Сейчас не получилось надёжно обработать сообщение. Попробуй ещё раз через минуту."
 )
@@ -40,6 +43,7 @@ class AgentLoop:
         prompt_path: str | Path | None = None,
         max_history_turns: int = DEFAULT_HISTORY_TURNS,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        conversation_timeout_hours: int | None = None,
     ) -> None:
         self.bus = bus
         self.llm_client = llm_client
@@ -51,9 +55,20 @@ class AgentLoop:
         )
         self.max_history_turns = max_history_turns
         self.max_iterations = max_iterations
+        
+        # Conversation timeout configuration
+        if conversation_timeout_hours is None:
+            env_timeout = os.environ.get("CONVERSATION_TIMEOUT_HOURS")
+            conversation_timeout_hours = (
+                int(env_timeout) if env_timeout else DEFAULT_CONVERSATION_TIMEOUT_HOURS
+            )
+        self.conversation_timeout_hours = conversation_timeout_hours
+        
+        # History storage with timestamps
         self._history: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=self.max_history_turns * 2)
         )
+        self._last_activity: dict[str, datetime] = {}
 
     async def run_once(self, state: UserState) -> OutboundEvent:
         """Consume one inbound message, process it, and publish one outbound reply."""
@@ -146,7 +161,7 @@ class AgentLoop:
             reply_text=ATHLETE_SAFE_FALLBACK,
         )
 
-    async def run_loop(self, state_store: InMemoryUserStateStore) -> None:
+    async def run_loop(self, state_store: UserStateStore) -> None:
         """Continuously consume bus events and dispatch replies. Run as a background task."""
         while True:
             try:
@@ -177,7 +192,54 @@ class AgentLoop:
         history = self._history[user_id]
         history.append({"role": "user", "content": user_text})
         history.append({"role": "assistant", "content": reply_text})
+        # Update last activity timestamp
+        self._last_activity[user_id] = datetime.now()
         return OutboundEvent(user_id=user_id, text=reply_text)
+
+    def cleanup_stale_conversations(self) -> int:
+        """
+        Remove conversation history for users inactive beyond the timeout period.
+        
+        Returns:
+            Number of conversations cleaned up.
+        """
+        if self.conversation_timeout_hours <= 0:
+            return 0
+            
+        now = datetime.now()
+        timeout_delta = timedelta(hours=self.conversation_timeout_hours)
+        stale_users: list[str] = []
+        
+        for user_id, last_activity in self._last_activity.items():
+            if now - last_activity > timeout_delta:
+                stale_users.append(user_id)
+        
+        for user_id in stale_users:
+            self._history.pop(user_id, None)
+            self._last_activity.pop(user_id, None)
+            logger.info(
+                "Cleaned up stale conversation for user {} (inactive for {} hours)",
+                user_id,
+                self.conversation_timeout_hours,
+            )
+        
+        return len(stale_users)
+
+    async def run_cleanup_loop(self) -> None:
+        """
+        Background task that periodically cleans up stale conversations.
+        Runs every hour.
+        """
+        while True:
+            try:
+                await asyncio.sleep(3600)  # Run every hour
+                cleaned = self.cleanup_stale_conversations()
+                if cleaned > 0:
+                    logger.info("Cleanup task removed {} stale conversations", cleaned)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Error in cleanup loop")
 
     def _sanitize_athlete_reply(self, content: str | None) -> str:
         if not content:

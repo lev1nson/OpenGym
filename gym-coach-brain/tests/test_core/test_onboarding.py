@@ -146,6 +146,31 @@ def test_map_invalid_training_split_raises():
         map_answer_to_coefficients("training_split", "invalid_split")
 
 
+def test_map_invalid_training_days_raises():
+    with pytest.raises((ValueError, KeyError)):
+        map_answer_to_coefficients("training_days_per_week", "2")
+
+
+def test_map_invalid_experience_level_raises():
+    with pytest.raises((ValueError, KeyError)):
+        map_answer_to_coefficients("experience_level", "novice")
+
+
+def test_map_invalid_goal_raises():
+    with pytest.raises((ValueError, KeyError)):
+        map_answer_to_coefficients("goal", "fat_loss")
+
+
+def test_map_invalid_sleep_quality_raises():
+    with pytest.raises((ValueError, KeyError)):
+        map_answer_to_coefficients("sleep_quality", "ok")
+
+
+def test_map_invalid_stress_level_raises():
+    with pytest.raises((ValueError, KeyError)):
+        map_answer_to_coefficients("stress_level", "normal")
+
+
 # ─── compute_initial_weights Tests ────────────────────────────────────────────
 
 @pytest.fixture
@@ -153,19 +178,19 @@ def mock_science_config_with_table(mock_science_config):
     """Extend mock_science_config with initial_weight_table for testing."""
     mock_science_config.__dict__["initial_weight_table"] = {
         "beginner": {
-            "horizontal_push": 0.40, "vertical_push": 0.30,
-            "horizontal_pull": 0.35, "vertical_pull": 0.30,
-            "squat": 0.60, "hinge": 0.50, "carry": 0.25,
+            "horizontal_push": 0.25, "vertical_push": 0.18,
+            "horizontal_pull": 0.22, "vertical_pull": 0.20,
+            "squat": 0.40, "hinge": 0.35, "carry": 0.20,
         },
         "intermediate": {
-            "horizontal_push": 0.70, "vertical_push": 0.55,
-            "horizontal_pull": 0.60, "vertical_pull": 0.55,
-            "squat": 1.00, "hinge": 0.90, "carry": 0.45,
+            "horizontal_push": 0.35, "vertical_push": 0.25,
+            "horizontal_pull": 0.30, "vertical_pull": 0.28,
+            "squat": 0.50, "hinge": 0.45, "carry": 0.25,
         },
         "advanced": {
-            "horizontal_push": 1.00, "vertical_push": 0.80,
-            "horizontal_pull": 0.90, "vertical_pull": 0.80,
-            "squat": 1.50, "hinge": 1.30, "carry": 0.65,
+            "horizontal_push": 0.50, "vertical_push": 0.35,
+            "horizontal_pull": 0.42, "vertical_pull": 0.40,
+            "squat": 0.70, "hinge": 0.65, "carry": 0.35,
         },
     }
     return mock_science_config
@@ -179,15 +204,15 @@ def _make_user_profile(bodyweight_kg: float, experience_level: str) -> UserProfi
 def test_compute_initial_weights_beginner(mock_science_config_with_table):
     profile = _make_user_profile(70.0, "beginner")
     result = compute_initial_weights(profile, mock_science_config_with_table)
-    assert result["horizontal_push"] == pytest.approx(28.0, rel=1e-2)
-    assert result["squat"] == pytest.approx(42.0, rel=1e-2)
+    assert result["horizontal_push"] == pytest.approx(17.5, rel=1e-2)
+    assert result["squat"] == pytest.approx(28.0, rel=1e-2)
 
 
 def test_compute_initial_weights_intermediate(mock_science_config_with_table):
     profile = _make_user_profile(80.0, "intermediate")
     result = compute_initial_weights(profile, mock_science_config_with_table)
-    assert result["squat"] == pytest.approx(80.0, rel=1e-2)
-    assert result["horizontal_push"] == pytest.approx(56.0, rel=1e-2)
+    assert result["squat"] == pytest.approx(40.0, rel=1e-2)
+    assert result["horizontal_push"] == pytest.approx(28.0, rel=1e-2)
 
 
 def test_compute_initial_weights_returns_all_7_patterns(mock_science_config_with_table):

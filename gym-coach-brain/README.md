@@ -1,4 +1,49 @@
-# OpenGym Brain Deployment
+# OpenGym Telegram Bot
+
+An AI-powered fitness coaching bot for Telegram that provides personalized workout planning, progress tracking, and conversational guidance.
+
+## Quick Start
+
+### For Local Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed setup instructions.
+
+**TL;DR:**
+```bash
+# Install dependencies
+uv sync
+
+# Set up environment variables (see docs/environment-variables.md)
+cp systemd/gym-coach-brain.env.example .env
+# Edit .env with your API keys
+
+# Run the bot
+uv run python -m gym_coach_brain.bot.main
+```
+
+### For Production Deployment
+
+See the [Production Deployment](#production-deployment) section below.
+
+## Features
+
+- 🤖 **Conversational AI Coach** - Natural language interaction powered by LLMs
+- 🎤 **Voice Message Support** - Send voice messages, get text responses
+- 💪 **Workout Planning** - Science-based progressive overload programs
+- 📊 **Progress Tracking** - Monitor performance and adaptation
+- 🔄 **Persistent State** - User data survives bot restarts
+- ⏰ **Smart Timeouts** - Automatic cleanup of stale conversations
+
+## Documentation
+
+- [Local Development Guide](DEVELOPMENT.md) - Set up and run locally
+- [Environment Variables](docs/environment-variables.md) - Complete configuration reference
+- [Architecture Overview](../docs/architecture.md) - System design and components
+- [API Contracts](../docs/api-contracts.md) - Backend API documentation
+
+---
+
+# Production Deployment
 
 `gym_coach_brain.api` is not a long-running service in Epic 6. The long-lived processes on the VPS are:
 

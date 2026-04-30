@@ -156,6 +156,13 @@ def _set_response_data(session: Session, **data: object) -> None:
     session.info["response_data"] = payload
 
 
+def _question_index(question_id: str) -> int:
+    for index, question in enumerate(QUESTIONS):
+        if question.id == question_id:
+            return index
+    return 0
+
+
 def _load_planned_exercises(workout_session: WorkoutSession) -> list[dict]:
     """Parse planned_exercises safely into a list of dicts."""
     try:
@@ -233,10 +240,45 @@ def handle_onboarding_start(
             session.delete(profile)
             session.flush()
         profile = UserProfile()
+        profile.onboarding_status = "in_progress"
+        profile.onboarding_current_question_id = QUESTIONS[0].id
         session.add(profile)
         session.flush()
+    else:
+        if profile.onboarding_status == "ready_to_complete":
+            _set_response_data(
+                session,
+                profile_exists=True,
+                onboarding_complete=False,
+                onboarding_status="ready_to_complete",
+                current_question_id=None,
+                next_question_id=None,
+                onboarding_ready_to_complete=True,
+            )
+            return "Все ответы приняты. Запустите onboarding_complete для завершения.", 0
+        if not profile.onboarding_current_question_id:
+            profile.onboarding_status = "in_progress"
+            profile.onboarding_current_question_id = QUESTIONS[0].id
+            session.flush()
 
-    return _format_question(1, len(QUESTIONS), QUESTIONS[0]), 0
+    current_question_id = profile.onboarding_current_question_id or QUESTIONS[0].id
+    current_index = _question_index(current_question_id)
+    _set_response_data(
+        session,
+        profile_exists=True,
+        onboarding_complete=False,
+        onboarding_status="in_progress",
+        current_question_id=current_question_id,
+        current_question_text=_format_question(current_index + 1, len(QUESTIONS), QUESTIONS[current_index]),
+        next_question_id=QUESTIONS[current_index + 1].id if current_index + 1 < len(QUESTIONS) else None,
+        next_question_text=(
+            _format_question(current_index + 2, len(QUESTIONS), QUESTIONS[current_index + 1])
+            if current_index + 1 < len(QUESTIONS)
+            else None
+        ),
+        onboarding_ready_to_complete=False,
+    )
+    return _format_question(current_index + 1, len(QUESTIONS), QUESTIONS[current_index]), 0
 
 
 def handle_onboarding_answer(
@@ -256,6 +298,18 @@ def handle_onboarding_answer(
     profile = _get_or_none(session)
     if profile is None:
         return "Профиль не найден. Сначала запустите onboarding_start.", 1
+    if profile.onboarding_complete:
+        return "Профиль уже заполнен. Используйте profile_update_* для изменений.", 1
+    if profile.onboarding_status == "ready_to_complete":
+        return "Все ответы уже собраны. Запустите onboarding_complete для завершения.", 1
+    if not profile.onboarding_current_question_id:
+        return "Нет активного onboarding-вопроса. Запустите onboarding_start.", 1
+    if args.question_id != profile.onboarding_current_question_id:
+        return (
+            "Ответ получен не на тот вопрос. "
+            f"Сейчас активный вопрос: {profile.onboarding_current_question_id}.",
+            1,
+        )
 
     question = next((q for q in QUESTIONS if q.id == args.question_id), None)
     if question is None:
@@ -287,8 +341,36 @@ def handle_onboarding_answer(
     next_idx = current_idx + 1
 
     if next_idx < len(QUESTIONS):
+        profile.onboarding_status = "in_progress"
+        profile.onboarding_current_question_id = QUESTIONS[next_idx].id
+        session.flush()
+        _set_response_data(
+            session,
+            profile_exists=True,
+            onboarding_complete=False,
+            onboarding_status="in_progress",
+            current_question_id=args.question_id,
+            current_question_text=_format_question(current_idx + 1, len(QUESTIONS), QUESTIONS[current_idx]),
+            next_question_id=QUESTIONS[next_idx].id,
+            next_question_text=_format_question(next_idx + 1, len(QUESTIONS), QUESTIONS[next_idx]),
+            onboarding_ready_to_complete=False,
+        )
         return _format_question(next_idx + 1, len(QUESTIONS), QUESTIONS[next_idx]), 0
 
+    profile.onboarding_status = "ready_to_complete"
+    profile.onboarding_current_question_id = None
+    session.flush()
+    _set_response_data(
+        session,
+        profile_exists=True,
+        onboarding_complete=False,
+        onboarding_status="ready_to_complete",
+        current_question_id=args.question_id,
+        current_question_text=_format_question(current_idx + 1, len(QUESTIONS), QUESTIONS[current_idx]),
+        next_question_id=None,
+        next_question_text=None,
+        onboarding_ready_to_complete=True,
+    )
     return "Все ответы приняты. Запустите onboarding_complete для завершения.", 0
 
 
@@ -304,6 +386,8 @@ def handle_onboarding_complete(
 
     if profile.onboarding_complete:
         return "Профиль уже заполнен. Используйте profile_update_* для изменений.", 1
+    if profile.onboarding_status != "ready_to_complete":
+        return "Онбординг ещё не завершён по шагам. Продолжите ответы через onboarding_answer.", 1
 
     if not profile.bodyweight_kg or profile.bodyweight_kg <= 0:
         return "Вес тела не задан. Ответьте на вопрос bodyweight_kg через onboarding_answer.", 1
@@ -317,7 +401,16 @@ def handle_onboarding_complete(
         profile.initial_weight_coefficients = json.dumps(weights)
 
     profile.onboarding_complete = True
+    profile.onboarding_status = "completed"
+    profile.onboarding_current_question_id = None
     session.flush()
+    _set_response_data(
+        session,
+        profile_exists=True,
+        onboarding_complete=True,
+        onboarding_status="completed",
+        current_question_id=None,
+    )
 
     weights_summary = (
         "\n".join(f"  {pattern}: {weight} кг" for pattern, weight in weights.items())
@@ -331,7 +424,9 @@ def handle_onboarding_complete(
         f"  Вес тела: {profile.bodyweight_kg} кг\n"
         f"  Тренировок в неделю: {profile.training_days_per_week}\n"
         f"  Сплит: {profile.training_split}\n\n"
-        f"Стартовые веса по паттернам:\n{weights_summary}",
+        "Консервативные стартовые ориентиры по паттернам:\n"
+        "  Это черновая база для первых тренировок, а не оценка ваших реальных рабочих весов.\n"
+        f"{weights_summary}",
         0,
     )
 
@@ -343,6 +438,14 @@ def handle_profile_show(argv: list[str], session: Session) -> tuple[str, int]:
     profile = _get_or_none(session)
     if profile is None:
         return "Профиль не найден. Запустите onboarding_start для создания профиля.", 1
+
+    _set_response_data(
+        session,
+        profile_exists=True,
+        onboarding_complete=bool(profile.onboarding_complete),
+        onboarding_status=str(profile.onboarding_status),
+        current_question_id=profile.onboarding_current_question_id,
+    )
 
     equipment_list = json.loads(profile.available_equipment or "[]")
     inventory_list = json.loads(profile.available_equipment_inventory or "[]")
@@ -365,7 +468,8 @@ def handle_profile_show(argv: list[str], session: Session) -> tuple[str, int]:
         f"Сплит: {profile.training_split}\n"
         f"Типы оборудования: {equipment_str}\n"
         f"Конкретный инвентарь: {inventory_str}\n\n"
-        f"Стартовые веса:\n{weights_str}",
+        "Консервативные стартовые ориентиры:\n"
+        f"{weights_str}",
         0,
     )
 

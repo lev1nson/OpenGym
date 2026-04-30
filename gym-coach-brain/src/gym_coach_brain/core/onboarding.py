@@ -119,6 +119,9 @@ _TRAINING_SPLIT_MAP: dict[str, TrainingSplit] = {
     "Своя": TrainingSplit.custom,
 }
 
+_EXPERIENCE_LEVEL_OPTIONS = {"beginner", "intermediate", "advanced"}
+_GOAL_OPTIONS = {"strength", "hypertrophy", "endurance"}
+_TRAINING_DAYS_OPTIONS = {"3", "4", "5", "6"}
 _SLEEP_QUALITY_MAP: dict[str, float] = {
     "poor": 0.3,
     "average": 0.6,
@@ -149,6 +152,8 @@ def map_answer_to_coefficients(question_id: str, answer: str) -> dict[str, float
         return {"bodyweight_kg": float(answer)}
 
     if question_id == "training_days_per_week":
+        if answer not in _TRAINING_DAYS_OPTIONS:
+            raise ValueError(f"Unknown training_days_per_week answer: {answer!r}")
         return {"training_days_per_week": int(answer)}
 
     if question_id == "training_split":
@@ -161,28 +166,61 @@ def map_answer_to_coefficients(question_id: str, answer: str) -> dict[str, float
         return resolve_equipment_answer(answer)
 
     if question_id == "experience_level":
+        if answer not in _EXPERIENCE_LEVEL_OPTIONS:
+            raise ValueError(f"Unknown experience_level answer: {answer!r}")
         return {"experience_level": answer}
 
     if question_id == "sleep_quality":
-        return {"sleep_quality_score": _SLEEP_QUALITY_MAP.get(answer, 0.5)}
+        if answer not in _SLEEP_QUALITY_MAP:
+            raise ValueError(f"Unknown sleep_quality answer: {answer!r}")
+        return {"sleep_quality_score": _SLEEP_QUALITY_MAP[answer]}
 
     if question_id == "stress_level":
-        return {"stress_score": _STRESS_LEVEL_MAP.get(answer, 0.5)}
+        if answer not in _STRESS_LEVEL_MAP:
+            raise ValueError(f"Unknown stress_level answer: {answer!r}")
+        return {"stress_score": _STRESS_LEVEL_MAP[answer]}
 
     if question_id == "age":
         return {"age": int(float(answer))}
 
     if question_id == "goal":
+        if answer not in _GOAL_OPTIONS:
+            raise ValueError(f"Unknown goal answer: {answer!r}")
         return {"goal": answer}
 
     return {}
 
 
+def compute_initial_weight_for_pattern(
+    user_profile: UserProfile,
+    science: ScienceConfig,
+    pattern_name: str,
+) -> float:
+    """Return a conservative baseline load for a movement pattern.
+
+    The returned value is intentionally conservative. It is a starter reference,
+    not a claim about the athlete's current working weight for a specific exercise.
+    """
+    bodyweight = user_profile.bodyweight_kg
+    if not bodyweight or bodyweight <= 0:
+        raise ValueError("bodyweight_kg must be set and positive before computing initial weights")
+
+    experience_level = user_profile.experience_level or "beginner"
+    table = getattr(science, "initial_weight_table", {})
+    if not table:
+        return 0.0
+
+    level_table = table.get(experience_level, table.get("beginner", {}))
+    coef = float(level_table.get(pattern_name, 0.0))
+    return round(bodyweight * coef, 1)
+
+
 def compute_initial_weights(user_profile: UserProfile, science: ScienceConfig) -> dict[str, float]:
-    """Compute initial weight coefficients for all movement patterns.
+    """Compute conservative starter baselines for all movement patterns.
 
     Formula: bodyweight_kg * initial_weight_table[experience_level][movement_pattern]
-    Result is stored in UserProfile.initial_weight_coefficients as JSON.
+    Result is stored in UserProfile.initial_weight_coefficients as JSON and later
+    adapted by the planner per exercise and equipment family.
 
     Args:
         user_profile: UserProfile with bodyweight_kg set (non-None, non-zero)
@@ -194,21 +232,16 @@ def compute_initial_weights(user_profile: UserProfile, science: ScienceConfig) -
     Raises:
         ValueError: if bodyweight_kg is None/zero, or experience_level missing from table
     """
-    bodyweight = user_profile.bodyweight_kg
-    if not bodyweight or bodyweight <= 0:
-        raise ValueError("bodyweight_kg must be set and positive before computing initial weights")
-
-    # Determine experience level — use persistent column or default to "beginner"
-    experience_level = user_profile.experience_level or "beginner"
-
     table = getattr(science, "initial_weight_table", {})
     if not table:
         return {}
 
+    # Determine experience level — use persistent column or default to "beginner"
+    experience_level = user_profile.experience_level or "beginner"
     level_table = table.get(experience_level, table.get("beginner", {}))
     return {
-        pattern: round(bodyweight * coef, 1)
-        for pattern, coef in level_table.items()
+        pattern: compute_initial_weight_for_pattern(user_profile, science, pattern)
+        for pattern in level_table
     }
 
 
