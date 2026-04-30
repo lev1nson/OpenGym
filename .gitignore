@@ -16,3 +16,15 @@ __pycache__/
 
 # Node
 node_modules/
+
+# Development Tools & IDE Configurations
+_bmad/
+_bmad-output/
+.agents/
+.claude/
+.gemini/
+.github/
+.kilo/
+.kilocode/
+.pytest_cache/
+.taskmaster/
